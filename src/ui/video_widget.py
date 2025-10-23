@@ -4,13 +4,29 @@ from PyQt5.QtWidgets import (
     QGroupBox, QVBoxLayout, QHBoxLayout, QPushButton,
     QSlider, QLabel, QFileDialog, QFrame, QSizePolicy
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtCore import Qt, pyqtSignal, QPoint
+from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont, QMouseEvent
 import numpy as np
+import cv2
 
 from src.utils.video_controller import VideoController
 from src.utils.video_loader import VideoLoader
 from src.utils.frame_processor import FrameProcessor
+
+
+class ClickableLabel(QLabel):
+    """Label that emits click signals with coordinates."""
+    
+    clicked = pyqtSignal(int, int)  # x, y coordinates (left click)
+    right_clicked = pyqtSignal(int, int)  # x, y coordinates (right click)
+    
+    def mousePressEvent(self, ev: QMouseEvent):
+        """Handle mouse press events."""
+        if ev.button() == Qt.LeftButton:
+            self.clicked.emit(ev.x(), ev.y())
+        elif ev.button() == Qt.RightButton:
+            self.right_clicked.emit(ev.x(), ev.y())
+        super().mousePressEvent(ev)
 
 
 class VideoWidget(QGroupBox):
@@ -20,6 +36,8 @@ class VideoWidget(QGroupBox):
     """
     
     video_loaded = pyqtSignal()  # Signal emitted when video is loaded
+    bead_clicked = pyqtSignal(int, int)  # Signal when bead is clicked (x, y in original frame coords)
+    bead_right_clicked = pyqtSignal(int, int)  # Signal when bead is right-clicked
 
     def __init__(self):
         """Initialize video widget."""
@@ -33,6 +51,14 @@ class VideoWidget(QGroupBox):
         self.controller.playback_state_changed.connect(self._on_playback_state_changed)
         self.controller.video_loaded.connect(self._on_video_loaded)
         self.controller.playback_finished.connect(self._on_playback_finished)
+        
+        # Tracking state
+        self.tracking_enabled = False
+        self.bead_positions = {}  # {bead_id: (x, y)} for current frame
+        self.click_to_select_mode = False
+        self.last_displayed_frame = None
+        self.display_scale = 1.0
+        self.display_offset = (0, 0)
         
         self._init_ui()
 
@@ -52,22 +78,20 @@ class VideoWidget(QGroupBox):
         
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(3, 3, 3, 3)
+        layout.setSpacing(3)
         
-        # Video display area
-        self.video_label = QLabel()
+        # Video display area (takes most space)
+        self.video_label = ClickableLabel()
+        self.video_label.clicked.connect(self._on_video_clicked)
+        self.video_label.right_clicked.connect(self._on_video_right_clicked)
         self.video_label.setAlignment(Qt.AlignCenter)
-        self.video_label.setMinimumSize(1024, 768)
+        self.video_label.setMinimumSize(640, 480)
         self.video_label.setStyleSheet("")
         self.video_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.video_label.setScaledContents(False)  # Don't auto-scale, we handle it manually
         layout.addWidget(self.video_label, 1)
         
-        # Frame info label
-        self.frame_info_label = QLabel("No video loaded")
-        self.frame_info_label.setAlignment(Qt.AlignCenter)
-        self.frame_info_label.setStyleSheet("padding: 2px;")
-        layout.addWidget(self.frame_info_label)
-        
-        # Timeline slider
+        # Timeline slider below video
         self.timeline_slider = QSlider(Qt.Horizontal)
         self.timeline_slider.setMinimum(0)
         self.timeline_slider.setMaximum(0)
@@ -75,7 +99,13 @@ class VideoWidget(QGroupBox):
         self.timeline_slider.sliderMoved.connect(self._on_slider_moved)
         layout.addWidget(self.timeline_slider)
         
-        # Control buttons
+        # Frame info label (compact, below slider)
+        self.frame_info_label = QLabel("")
+        self.frame_info_label.setAlignment(Qt.AlignCenter)
+        self.frame_info_label.setStyleSheet("padding: 2px; color: #666;")
+        layout.addWidget(self.frame_info_label)
+        
+        # Control buttons at the bottom
         controls_layout = QHBoxLayout()
         controls_layout.setSpacing(8)
         controls_layout.setContentsMargins(0, 2, 0, 0)
@@ -99,8 +129,6 @@ class VideoWidget(QGroupBox):
         
         controls_layout.addStretch()
         layout.addLayout(controls_layout)
-        
-        layout.addStretch(1)
         
         return frame
 
@@ -142,6 +170,13 @@ class VideoWidget(QGroupBox):
     
     def _on_frame_changed(self, frame_index: int, frame_data: np.ndarray):
         """Handle frame changed signal from controller."""
+        # Store original frame
+        self.last_displayed_frame = frame_data.copy()
+        
+        # Draw tracking overlays if enabled
+        if self.tracking_enabled and len(self.bead_positions) > 0:
+            frame_data = self._draw_tracking_overlays(frame_data)
+        
         # Display the frame
         self._display_frame(frame_data)
         
@@ -150,6 +185,111 @@ class VideoWidget(QGroupBox):
         
         # Update info
         self._update_frame_info(frame_index)
+    
+    def _draw_tracking_overlays(self, frame: np.ndarray) -> np.ndarray:
+        """Draw numbered squares around tracked beads."""
+        frame_with_overlay = frame.copy()
+        
+        for bead_id, (x, y) in self.bead_positions.items():
+            # Draw square (20x20 pixels around center)
+            box_size = 20
+            pt1 = (x - box_size, y - box_size)
+            pt2 = (x + box_size, y + box_size)
+            
+            # Different colors for different beads
+            colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), 
+                     (255, 0, 255), (0, 255, 255), (255, 128, 0), (128, 0, 255)]
+            color = colors[bead_id % len(colors)]
+            
+            cv2.rectangle(frame_with_overlay, pt1, pt2, color, 2)
+            
+            # Draw bead number
+            cv2.putText(frame_with_overlay, str(bead_id + 1), 
+                       (x - 10, y - box_size - 5),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        
+        return frame_with_overlay
+    
+    def _on_video_clicked(self, display_x: int, display_y: int):
+        """Handle clicks on the video display."""
+        if self.click_to_select_mode and self.last_displayed_frame is not None:
+            # Convert display coordinates to original frame coordinates
+            original_x, original_y = self._display_to_frame_coords(display_x, display_y)
+            
+            if original_x is not None and original_y is not None:
+                # Emit signal with original frame coordinates
+                self.bead_clicked.emit(original_x, original_y)
+    
+    def _on_video_right_clicked(self, display_x: int, display_y: int):
+        """Handle right-clicks on the video display."""
+        if self.click_to_select_mode and self.last_displayed_frame is not None:
+            # Convert display coordinates to original frame coordinates
+            original_x, original_y = self._display_to_frame_coords(display_x, display_y)
+            
+            if original_x is not None and original_y is not None:
+                # Emit signal with original frame coordinates
+                self.bead_right_clicked.emit(original_x, original_y)
+    
+    def _display_to_frame_coords(self, display_x: int, display_y: int):
+        """Convert display coordinates to original frame coordinates."""
+        if self.last_displayed_frame is None:
+            return None, None
+        
+        # Get original frame dimensions
+        frame_h, frame_w = self.last_displayed_frame.shape[:2]
+        
+        # Get display label size
+        label_w = self.video_label.width()
+        label_h = self.video_label.height()
+        
+        # Calculate scale that was used (same as in _display_frame)
+        scale = min(label_w / frame_w, label_h / frame_h)
+        
+        # Calculate displayed dimensions
+        display_w = int(frame_w * scale)
+        display_h = int(frame_h * scale)
+        
+        # Calculate offset (centering)
+        offset_x = (label_w - display_w) // 2
+        offset_y = (label_h - display_h) // 2
+        
+        # Remove offset
+        relative_x = display_x - offset_x
+        relative_y = display_y - offset_y
+        
+        # Check if click is within the actual image
+        if relative_x < 0 or relative_y < 0 or relative_x >= display_w or relative_y >= display_h:
+            return None, None
+        
+        # Scale back to original coordinates
+        original_x = int(relative_x / scale)
+        original_y = int(relative_y / scale)
+        
+        return original_x, original_y
+    
+    def set_tracking_enabled(self, enabled: bool):
+        """Enable or disable tracking visualization."""
+        self.tracking_enabled = enabled
+        # Redraw current frame
+        if self.last_displayed_frame is not None:
+            frame_index = self.controller.current_frame_index
+            self._on_frame_changed(frame_index, self.last_displayed_frame.copy())
+    
+    def set_click_to_select_mode(self, enabled: bool):
+        """Enable or disable click-to-select mode."""
+        self.click_to_select_mode = enabled
+        if enabled:
+            self.video_label.setCursor(Qt.CrossCursor)
+        else:
+            self.video_label.setCursor(Qt.ArrowCursor)
+    
+    def update_bead_positions(self, bead_positions: dict):
+        """Update bead positions for current frame."""
+        self.bead_positions = bead_positions
+        # Trigger redraw if tracking is enabled
+        if self.tracking_enabled and self.last_displayed_frame is not None:
+            frame_index = self.controller.current_frame_index
+            self._on_frame_changed(frame_index, self.last_displayed_frame.copy())
     
     def _on_playback_state_changed(self, is_playing: bool):
         """Handle playback state changed signal from controller."""
@@ -198,11 +338,11 @@ class VideoWidget(QGroupBox):
             time_seconds = frame_index / fps
             total_seconds = total_frames / fps
             self.frame_info_label.setText(
-                f"Frame {frame_index + 1}/{total_frames} | "
-                f"Time: {time_seconds:.2f}s / {total_seconds:.2f}s"
+                f"Frame {frame_index + 1}/{total_frames}  |  "
+                f"{time_seconds:.2f}s / {total_seconds:.2f}s"
             )
         else:
-            self.frame_info_label.setText("No video loaded")
+            self.frame_info_label.setText("")
 
     def cleanup(self):
         """Clean up resources."""

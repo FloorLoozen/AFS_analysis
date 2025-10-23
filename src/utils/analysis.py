@@ -54,6 +54,189 @@ class TrackingResult:
         return distances / dt
 
 
+def detect_beads_auto(frame: np.ndarray, min_area: int = 50, max_area: int = 5000, 
+                       threshold_value: int = 150) -> List[Tuple[int, int]]:
+    """
+    Automatically detect bright circular beads in a frame.
+    
+    Args:
+        frame: Input frame (RGB or grayscale)
+        min_area: Minimum area of bead in pixels
+        max_area: Maximum area of bead in pixels
+        threshold_value: Brightness threshold (0-255)
+    
+    Returns:
+        List of (x, y) center positions of detected beads
+    """
+    # Convert to grayscale if needed
+    if len(frame.shape) == 3:
+        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+    else:
+        gray = frame
+    
+    # Apply threshold to get bright regions
+    _, binary = cv2.threshold(gray, threshold_value, 255, cv2.THRESH_BINARY)
+    
+    # Find contours
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    bead_positions = []
+    
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        
+        # Filter by area
+        if min_area <= area <= max_area:
+            # Calculate centroid
+            M = cv2.moments(contour)
+            if M["m00"] != 0:
+                cx = int(M["m10"] / M["m00"])
+                cy = int(M["m01"] / M["m00"])
+                
+                # Check circularity (optional, helps filter out non-bead objects)
+                perimeter = cv2.arcLength(contour, True)
+                if perimeter > 0:
+                    circularity = 4 * np.pi * area / (perimeter * perimeter)
+                    if circularity > 0.5:  # Reasonably circular
+                        bead_positions.append((cx, cy))
+    
+    return bead_positions
+
+
+class BeadTracker:
+    """Tracks multiple beads using template matching."""
+    
+    def __init__(self, window_size: int = 40):
+        """
+        Initialize bead tracker.
+        
+        Args:
+            window_size: Size of tracking window around bead
+        """
+        self.window_size = window_size
+        self.beads: List[Dict[str, Any]] = []  # List of beads with their data
+        
+    def add_bead(self, frame: np.ndarray, x: int, y: int, bead_id: int):
+        """
+        Add a new bead to track.
+        
+        Args:
+            frame: First frame to extract template from
+            x, y: Initial position of bead center
+            bead_id: Unique ID for this bead
+        """
+        # Extract template around the bead
+        half_size = self.window_size // 2
+        h, w = frame.shape[:2]
+        
+        # Ensure we don't go out of bounds
+        y1 = max(0, y - half_size)
+        y2 = min(h, y + half_size)
+        x1 = max(0, x - half_size)
+        x2 = min(w, x + half_size)
+        
+        template = frame[y1:y2, x1:x2].copy()
+        
+        # Convert to grayscale if needed
+        if len(template.shape) == 3:
+            template_gray = cv2.cvtColor(template, cv2.COLOR_RGB2GRAY)
+        else:
+            template_gray = template
+        
+        bead = {
+            'id': bead_id,
+            'template': template_gray,
+            'positions': [(x, y)],  # List of (x, y) positions for each frame
+            'initial_pos': (x, y)
+        }
+        
+        self.beads.append(bead)
+    
+    def track_frame(self, frame: np.ndarray, search_radius: int = 50) -> List[Tuple[int, int, int]]:
+        """
+        Track all beads in a new frame.
+        
+        Args:
+            frame: New frame to track beads in
+            search_radius: How far from last position to search
+        
+        Returns:
+            List of (bead_id, x, y) positions
+        """
+        if len(frame.shape) == 3:
+            frame_gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+        else:
+            frame_gray = frame
+        
+        results = []
+        
+        for bead in self.beads:
+            template = bead['template']
+            last_x, last_y = bead['positions'][-1]
+            
+            # Define search region
+            h, w = frame_gray.shape
+            th, tw = template.shape
+            
+            # Search region around last known position
+            x1 = max(0, last_x - search_radius)
+            y1 = max(0, last_y - search_radius)
+            x2 = min(w, last_x + search_radius + tw)
+            y2 = min(h, last_y + search_radius + th)
+            
+            search_region = frame_gray[y1:y2, x1:x2]
+            
+            # Template matching
+            if search_region.shape[0] < th or search_region.shape[1] < tw:
+                # Search region too small, use last position
+                new_x, new_y = last_x, last_y
+            else:
+                result = cv2.matchTemplate(search_region, template, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, max_loc = cv2.minMaxLoc(result)
+                
+                # Convert to frame coordinates
+                new_x = x1 + max_loc[0] + tw // 2
+                new_y = y1 + max_loc[1] + th // 2
+            
+            # Store new position
+            bead['positions'].append((new_x, new_y))
+            results.append((bead['id'], new_x, new_y))
+        
+        return results
+    
+    def get_bead_positions(self, bead_id: int) -> List[Tuple[int, int]]:
+        """Get all positions for a specific bead."""
+        for bead in self.beads:
+            if bead['id'] == bead_id:
+                return bead['positions']
+        return []
+    
+    def get_all_beads_data(self) -> Dict[int, List[Tuple[int, int]]]:
+        """Get all tracking data for all beads."""
+        return {bead['id']: bead['positions'] for bead in self.beads}
+    
+    def get_bead_count(self) -> int:
+        """Get number of tracked beads."""
+        return len(self.beads)
+    
+    def load_from_data(self, beads_data: List[Dict[str, Any]]):
+        """
+        Load tracking data from saved format.
+        
+        Args:
+            beads_data: List of bead dictionaries with id, positions, template
+        """
+        self.beads = beads_data
+    
+    def clear(self):
+        """Clear all tracked beads."""
+        self.beads = []
+    
+    def remove_bead(self, bead_id: int):
+        """Remove a specific bead from tracking."""
+        self.beads = [bead for bead in self.beads if bead['id'] != bead_id]
+
+
 class XYTracker:
     """Tracks XY position of features in video frames."""
     

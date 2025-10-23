@@ -1,101 +1,74 @@
 # AFS Analysis
 
-Video analysis application for Atomic Force Spectroscopy HDF5 data.
-
-## Architecture
-
-**Modular Design**:
-- `src/utils/`: Video loading, analysis algorithms, data export utilities
-- `src/ui/`: User interface (PyQt5 widgets)
+Video analysis application for Atomic Force Spectroscopy HDF5 data with XY bead tracking.
 
 ## Features
 
 ### Video Player
-- **HDF5 Support**: Read video data from AFS_acquisition HDF5 files (`data/main_video` dataset)
-core ayback Controls**: Play, Pause, Stop with accurate FPS playback
-- **Timeline Navigation**: Slider for frame-by-frame navigation
-- **Frame Information**: Display current frame, time, and FPS
+- **HDF5 Support**: Read video from AFS_acquisition files (`/data/main_video`)
+- **Playback Controls**: Play, pause, stop with frame-by-frame navigation
+- **Metadata Display**: Show recording info (frames, FPS, duration)
 
-### Analysis Tools
-- **XY Tracking**: Track particle position over time
-- **Z Tracking**: Measure vertical displacement using focus metrics
-- **Data Export**: Export results to CSV, JSON, or NumPy formats
-- **Metadata Display**: Display HDF5 metadata (frames, FPS, duration, sample info)
-- **Modular Tab System**: Easy to extend with new analysis tools
-
-### Interface
-- **Two-Column Layout**: Video player (left) + Analysis tabs (right)
-- **Maximized by Default**: Starts in maximized window mode
-- **Keyboard Shortcuts**:
-  - `Ctrl+O`: Open HDF5 file
-  - `F11`: Toggle maximize window
-  - `Ctrl+Q`: Exit application
+### XY Bead Tracking
+- **Auto-Detection**: Automatically find beads using adjustable parameters
+- **Manual Validation**: Add/remove beads with left/right clicks
+- **Template Matching**: Track bead positions across all frames
+- **Auto-Save**: Saves every 100 frames during tracking
+- **Resume Capability**: Continue from last tracked frame
+- **HDF5 Storage**: Data saved to `/analysis/xy_tracking` in source file
+- **CSV Export**: Export tracking data for external analysis
 
 ## Installation
 
 ```bash
-pip install -r requirements.txt
+pip install PyQt5 opencv-python h5py numpy
 ```
 
 ## Usage
 
-### GUI Application
 ```bash
 python src/main.py
 ```
 
-### Using Utils in Scripts
-```python
-from src.utils.video_loader import VideoLoader
+### Tracking Workflow
+1. Open HDF5 file (Ctrl+O)
+2. Click **Load** if previous tracking exists, or
+3. Click **Auto** to detect beads (adjust threshold/size if needed)
+4. Remove unwanted beads (right-click) or add missed ones (left-click)
+5. Click **Track** to process all frames
+6. Click **Save** to save to HDF5 or **CSV** to export
 
-# Load HDF5 video
-video = VideoLoader.load("data.hdf5")
+## HDF5 Structure
 
-# Get metadata
-metadata = video.get_metadata()
-print(f"Total frames: {video.total_frames}")
-print(f"FPS: {video.fps}")
+**Input** (from AFS_acquisition):
+- `/data/main_video` - Video dataset (frames, height, width, channels)
 
-# Get frame
-frame = video.get_frame(0)
-print(f"Frame shape: {frame.shape}")
+**Output** (created by AFS_analysis):
+- `/analysis/xy_tracking` - Tracking positions (frames, beads, xy)
+- Templates and metadata stored as attributes/datasets
+
+## Architecture
+
 ```
-
-## Project Structure
-
+src/
+├── main.py                 # Entry point
+├── ui/
+│   ├── main_window.py      # Main app window
+│   ├── video_widget.py     # Video player with overlay
+│   ├── analysis_widget.py  # Tab container
+│   └── tabs/
+│       ├── xy_traces_tab.py  # XY tracking UI
+│       └── [z_traces_tab.py]  # Placeholder for Z tracking
+└── utils/
+    ├── video_loader.py     # HDF5 video source
+    ├── video_controller.py # Playback control
+    ├── analysis.py         # BeadTracker, auto-detection
+    └── tracking_io.py      # HDF5 save/load
 ```
-AFS_analysis/
-├── README.md
-└── src/
-    ├── main.py
-    ├── utils/                         # Utilities
-    │   ├── video_loader.py            # HDF5 video loading
-    │   ├── video_controller.py        # Playback control
-    │   └── frame_processor.py         # Frame processing
-    │
-    └── ui/                            # User Interface
-        ├── main_window.py             # Main window
-        ├── video_widget.py            # Video player
-        └── measurement_info_widget.py # Info display
-```
-
-## Design
-
-**Utils**: Video loading and playback (numpy, cv2, h5py)
-
-**UI**: Simple PyQt5 video player interface
-
-**Benefits**: Minimal, focused, easy to use
-
-## HDF5 File Structure
-
-Compatible with AFS_acquisition output files:
-- `data/main_video`: Video dataset (frames, height, width, channels)
-- Metadata attributes: `actual_fps`, `fps`, sample info, recording settings
 
 ## Dependencies
 
 - PyQt5 >= 5.15.0
 - NumPy >= 1.21.0
-- OpenCV-Python >= 4.5.0
+- OpenCV >= 4.5.0
 - h5py >= 3.0.0

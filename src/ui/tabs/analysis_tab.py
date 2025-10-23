@@ -16,12 +16,12 @@ class AnalysisTab(QWidget):
     def _init_ui(self):
         """Initialize the user interface."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setContentsMargins(8, 24, 8, 8)
         
         # Placeholder content
         label = QLabel("Analysis\n\n(To be implemented)")
         label.setAlignment(Qt.AlignCenter)
-        label.setStyleSheet("color: #888; font-style: italic; font-size: 14px;")
+        label.setStyleSheet("color: #888; font-style: italic;")
         layout.addWidget(label)
         
         layout.addStretch()

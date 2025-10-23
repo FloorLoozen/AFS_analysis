@@ -26,7 +26,6 @@ class MainWindow(QMainWindow):
     def _init_ui(self):
         """Initialize the user interface."""
         self.setWindowTitle("AFS Analysis")
-        self.setGeometry(100, 100, 1400, 800)
         
         # Create menu bar
         self._create_menu_bar()
@@ -47,6 +46,13 @@ class MainWindow(QMainWindow):
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self._open_video)
         file_menu.addAction(open_action)
+        
+        file_menu.addSeparator()
+        
+        toggle_action = QAction("Toggle Maximize", self)
+        toggle_action.setShortcut("F11")
+        toggle_action.triggered.connect(self._toggle_fullscreen)
+        file_menu.addAction(toggle_action)
         
         file_menu.addSeparator()
         
