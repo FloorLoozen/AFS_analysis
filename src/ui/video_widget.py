@@ -121,6 +121,12 @@ class VideoWidget(QGroupBox):
         self.play_button.setEnabled(False)
         controls_layout.addWidget(self.play_button)
         
+        self.pause_button = QPushButton("Pause")
+        self.pause_button.setFixedWidth(60)
+        self.pause_button.clicked.connect(self._on_pause_button_clicked)
+        self.pause_button.setEnabled(False)
+        controls_layout.addWidget(self.pause_button)
+        
         self.stop_button = QPushButton("Stop")
         self.stop_button.setFixedWidth(60)
         self.stop_button.clicked.connect(self._on_stop_button_clicked)
@@ -157,7 +163,8 @@ class VideoWidget(QGroupBox):
             self.timeline_slider.setMaximum(self.controller.get_total_frames() - 1)
             self.timeline_slider.setValue(0)
             self.play_button.setEnabled(True)
-            self.stop_button.setEnabled(True)
+            self.pause_button.setEnabled(False)
+            self.stop_button.setEnabled(False)
             
         except Exception as e:
             self.frame_info_label.setText(f"Error: {str(e)}")
@@ -293,7 +300,18 @@ class VideoWidget(QGroupBox):
     
     def _on_playback_state_changed(self, is_playing: bool):
         """Handle playback state changed signal from controller."""
-        self.play_button.setText("Pause" if is_playing else "Play")
+        if is_playing:
+            self.play_button.setEnabled(False)
+            self.pause_button.setEnabled(True)
+            self.stop_button.setEnabled(True)
+        else:
+            self.play_button.setEnabled(True)
+            self.pause_button.setEnabled(False)
+            # Stop button enabled if not at beginning
+            if self.controller.current_frame_index > 0:
+                self.stop_button.setEnabled(True)
+            else:
+                self.stop_button.setEnabled(False)
     
     def _on_playback_finished(self):
         """Handle playback finished signal from controller."""
@@ -319,7 +337,11 @@ class VideoWidget(QGroupBox):
 
     def _on_play_button_clicked(self):
         """Handle play button click."""
-        self.controller.toggle_play_pause()
+        self.controller.play()
+
+    def _on_pause_button_clicked(self):
+        """Handle pause button click."""
+        self.controller.pause()
 
     def _on_stop_button_clicked(self):
         """Handle stop button click."""
