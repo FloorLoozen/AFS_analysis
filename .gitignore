@@ -23,6 +23,10 @@ ENV/
 logs/
 *.log
 
+# HDF5 files
+*.hdf5
+*.h5
+
 # Tests
 tests/
 *_test.py
@@ -41,3 +45,4 @@ vscode/*
 # Zencoder
 zencoder_temp/
 *.zencoder.*
+

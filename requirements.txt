@@ -1,0 +1,5 @@
+# AFS Analysis Requirements
+PyQt5>=5.15.0
+numpy>=1.21.0
+opencv-python>=4.5.0
+h5py>=3.0.0
