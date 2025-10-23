@@ -11,6 +11,7 @@ class HDF5VideoSource:
     """Video source from HDF5 files (AFS_acquisition format)."""
     
     def __init__(self, file_path: str):
+        self.file_path = file_path
         self.hdf5_file = None
         self.video_data = None
         self.total_frames = 0
@@ -87,8 +88,49 @@ class HDF5VideoSource:
         self.video_data = None
     
     def get_metadata(self) -> Dict[str, Any]:
-        """Get video metadata."""
-        return self.metadata.copy()
+        """Get video metadata including file info, video properties, and HDF5 attributes."""
+        metadata = {
+            'file_path': self.file_path,
+            'total_frames': self.total_frames,
+            'actual_fps': self.fps,
+            'dtype': str(self.video_data.dtype) if self.video_data is not None else None,
+            'frame_shape': list(self.video_data.shape[1:]) if self.video_data is not None else None,
+        }
+        
+        # Add compression info if available
+        if self.video_data is not None:
+            if hasattr(self.video_data, 'compression'):
+                metadata['compression'] = self.video_data.compression
+            if hasattr(self.video_data, 'compression_opts'):
+                metadata['compression_opts'] = self.video_data.compression_opts
+        
+        # Add video dataset attributes
+        metadata.update(self.metadata)
+        
+        # Add data group attributes if available
+        if self.hdf5_file is not None:
+            try:
+                if 'data' in self.hdf5_file:
+                    data_group = self.hdf5_file['data']
+                    for key in data_group.attrs.keys():
+                        if key not in metadata:
+                            value = data_group.attrs[key]
+                            # Decode bytes to string
+                            if isinstance(value, bytes):
+                                value = value.decode('utf-8')
+                            metadata[key] = value
+                
+                # Add root level attributes
+                for key in self.hdf5_file.attrs.keys():
+                    if key not in metadata:
+                        value = self.hdf5_file.attrs[key]
+                        if isinstance(value, bytes):
+                            value = value.decode('utf-8')
+                        metadata[key] = value
+            except Exception as e:
+                print(f"Error reading HDF5 attributes: {e}")
+        
+        return metadata
 
 
 class VideoLoader:

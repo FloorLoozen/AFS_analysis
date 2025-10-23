@@ -69,37 +69,19 @@ class MainWindow(QMainWindow):
         help_menu.addAction(about_action)
 
     def _create_central_layout(self):
-        """Create main layout: left column (video + info) + right column (analysis)."""
+        """Create main layout: left column (video only) + right column (analysis tabs)."""
         central = QWidget(self)
         main_layout = QHBoxLayout(central)
         main_layout.setContentsMargins(6, 6, 6, 6)
         main_layout.setSpacing(10)
         
-        # Left column with two rows (video on top, measurement info on bottom)
-        left_column = QWidget()
-        left_layout = QVBoxLayout(left_column)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(10)
-        
-        # Top: Video player
+        # Left column - Video player only
         from src.ui.video_widget import VideoWidget
         self.video_widget = VideoWidget()
         self.video_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        left_layout.addWidget(self.video_widget)
+        main_layout.addWidget(self.video_widget)
         
-        # Bottom: Measurement info
-        from src.ui.measurement_info_widget import MeasurementInfoWidget
-        self.measurement_info_widget = MeasurementInfoWidget()
-        self.measurement_info_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        left_layout.addWidget(self.measurement_info_widget)
-        
-        # Set stretch: video 2/3, info 1/3
-        left_layout.setStretch(0, 2)
-        left_layout.setStretch(1, 1)
-        
-        main_layout.addWidget(left_column)
-        
-        # Right column - Analysis controls (empty placeholder)
+        # Right column - Analysis tabs (includes Info tab)
         from src.ui.analysis_widget import AnalysisWidget
         self.analysis_widget = AnalysisWidget()
         self.analysis_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -111,11 +93,9 @@ class MainWindow(QMainWindow):
         
         # Connect widgets
         self.analysis_widget.set_video_widget(self.video_widget)
-        self.measurement_info_widget.set_video_widget(self.video_widget)
         
         # Connect signals
         self.video_widget.video_loaded.connect(self.analysis_widget.update_video_info)
-        self.video_widget.video_loaded.connect(self.measurement_info_widget.update_info)
         
         self.setCentralWidget(central)
 

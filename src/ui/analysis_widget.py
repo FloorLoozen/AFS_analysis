@@ -41,11 +41,13 @@ class AnalysisWidget(QWidget):
     def _add_tabs(self):
         """Add all analysis tabs."""
         # Import tab modules
+        from src.ui.tabs.info_tab import InfoTab
         from src.ui.tabs.xy_traces_tab import XYTracesTab
         from src.ui.tabs.z_traces_tab import ZTracesTab
         from src.ui.tabs.analysis_tab import AnalysisTab
         
-        # Create and add tabs
+        # Create and add tabs (Info first)
+        self.tab_widget.addTab(InfoTab(), "Info")
         self.tab_widget.addTab(XYTracesTab(), "XY Traces")
         self.tab_widget.addTab(ZTracesTab(), "Z Traces")
         self.tab_widget.addTab(AnalysisTab(), "Analysis")
