@@ -36,12 +36,12 @@ class MeasurementInfoWidget(QGroupBox):
         layout = QVBoxLayout(frame)
         layout.setContentsMargins(10, 10, 10, 10)
         
-        # Info display area
+        # Info display area - compact single line
         self.info_label = QLabel("No video loaded")
-        self.info_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        self.info_label.setWordWrap(True)
-        self.info_label.setStyleSheet("padding: 5px;")
-        layout.addWidget(self.info_label, 1)
+        self.info_label.setAlignment(Qt.AlignCenter)
+        self.info_label.setWordWrap(False)
+        self.info_label.setStyleSheet("padding: 5px; font-size: 10pt;")
+        layout.addWidget(self.info_label)
         
         return frame
     
@@ -57,38 +57,27 @@ class MeasurementInfoWidget(QGroupBox):
             self.info_label.setText("No video loaded")
             return
         
-        # Format metadata in a clean, minimal way
-        info_text = ""
+        # Format metadata - simple and essential only
+        info_parts = []
         
-        # Sample information first
-        if 'user_sample_name' in metadata:
-            info_text += f"<b>Sample:</b> {metadata['user_sample_name']}<br>"
-        if 'user_operator' in metadata:
-            info_text += f"<b>Operator:</b> {metadata['user_operator']}<br>"
-        
-        if info_text:
-            info_text += "<br>"
-        
-        # Recording stats
+        # Only show key recording information
         if 'total_frames' in metadata:
-            info_text += f"<b>Frames:</b> {metadata['total_frames']}<br>"
+            info_parts.append(f"Frames: {metadata['total_frames']}")
+        
         if 'actual_fps' in metadata:
-            info_text += f"<b>FPS:</b> {metadata['actual_fps']:.2f}<br>"
-        if 'recording_duration_s' in metadata:
-            duration = metadata['recording_duration_s']
-            info_text += f"<b>Duration:</b> {duration:.1f}s<br>"
+            fps = metadata['actual_fps']
+            info_parts.append(f"FPS: {fps:.2f}")
+            
+            # Calculate and show duration
+            if 'total_frames' in metadata:
+                duration = metadata['total_frames'] / fps
+                info_parts.append(f"Duration: {duration:.1f}s")
         
-        if info_text and ('frame_shape' in metadata or 'total_data_mb' in metadata):
-            info_text += "<br>"
-        
-        # Technical details
         if 'frame_shape' in metadata:
             shape = metadata['frame_shape']
-            info_text += f"<b>Resolution:</b> {shape}<br>"
-        if 'downscale_factor' in metadata:
-            info_text += f"<b>Downscale:</b> {metadata['downscale_factor']}x<br>"
-        if 'total_data_mb' in metadata:
-            size_mb = metadata['total_data_mb']
-            info_text += f"<b>Size:</b> {size_mb:.1f} MB<br>"
+            if isinstance(shape, (list, tuple)) and len(shape) >= 2:
+                info_parts.append(f"Resolution: {shape[1]}×{shape[0]}")
         
+        # Join with separators
+        info_text = " | ".join(info_parts) if info_parts else "No video loaded"
         self.info_label.setText(info_text)

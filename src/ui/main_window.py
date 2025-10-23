@@ -76,13 +76,13 @@ class MainWindow(QMainWindow):
         left_layout.setSpacing(10)
         
         # Top: Video player
-        from ui.video_widget import VideoWidget
+        from src.ui.video_widget import VideoWidget
         self.video_widget = VideoWidget()
         self.video_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         left_layout.addWidget(self.video_widget)
         
         # Bottom: Measurement info
-        from ui.measurement_info_widget import MeasurementInfoWidget
+        from src.ui.measurement_info_widget import MeasurementInfoWidget
         self.measurement_info_widget = MeasurementInfoWidget()
         self.measurement_info_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         left_layout.addWidget(self.measurement_info_widget)
@@ -94,7 +94,7 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(left_column)
         
         # Right column - Analysis controls (empty placeholder)
-        from ui.analysis_widget import AnalysisWidget
+        from src.ui.analysis_widget import AnalysisWidget
         self.analysis_widget = AnalysisWidget()
         self.analysis_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         main_layout.addWidget(self.analysis_widget)
