@@ -2,33 +2,115 @@
 
 import cv2
 import numpy as np
-from typing import Tuple
+from typing import Tuple, Dict, Optional
 
 
 class FrameProcessor:
     """Handles frame processing operations."""
     
     @staticmethod
-    def resize_to_fit(frame: np.ndarray, target_width: int, target_height: int) -> np.ndarray:
+    def resize_to_fit(frame: np.ndarray, target_width: int, target_height: int, 
+                      keep_aspect_ratio: bool = True) -> Tuple[np.ndarray, float]:
         """
-        Resize frame to fit within target dimensions while maintaining aspect ratio.
+        Resize frame to fit within target dimensions.
         
         Args:
             frame: Input frame (RGB or BGR)
             target_width: Maximum width
             target_height: Maximum height
+            keep_aspect_ratio: Whether to maintain aspect ratio (default True)
         
         Returns:
-            Resized frame
+            Tuple of (resized_frame, scale_factor)
         """
+        if frame is None or frame.size == 0:
+            return frame, 1.0
+            
         h, w = frame.shape[:2]
         
-        # Calculate scaling to fit target size while maintaining aspect ratio
-        scale = min(target_width / w, target_height / h)
-        new_w, new_h = int(w * scale), int(h * scale)
+        if keep_aspect_ratio:
+            # Calculate scaling to fit target size while maintaining aspect ratio
+            scale = min(target_width / w, target_height / h)
+            new_w, new_h = int(w * scale), int(h * scale)
+        else:
+            new_w, new_h = target_width, target_height
+            scale = min(target_width / w, target_height / h)
         
-        # Resize frame
-        return cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        # Resize frame using fast interpolation
+        if scale < 1.0:
+            # Downsampling - use AREA for better quality
+            resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        else:
+            # Upsampling - use LINEAR for speed
+            resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        
+        return resized, scale
+    
+    @staticmethod
+    def draw_bead_overlays(frame: np.ndarray, bead_positions: Dict[int, Tuple[int, int]], 
+                          box_size: int = 30, box_thickness: int = 2) -> np.ndarray:
+        """
+        Draw tracking overlays on frame.
+        
+        Args:
+            frame: Input frame (will be copied, not modified)
+            bead_positions: Dictionary mapping bead_id to (x, y) position
+            box_size: Size of box around bead
+            box_thickness: Thickness of box lines
+        
+        Returns:
+            Frame with overlays drawn
+        """
+        if not bead_positions or frame is None:
+            return frame
+        
+        # Work on a copy to not modify original
+        frame_with_overlay = frame.copy()
+        half_size = box_size // 2
+        
+        # Color for overlays (green in RGB)
+        color = (0, 255, 0)
+        
+        for bead_id, (x, y) in bead_positions.items():
+            # Draw box around bead
+            pt1 = (x - half_size, y - half_size)
+            pt2 = (x + half_size, y + half_size)
+            cv2.rectangle(frame_with_overlay, pt1, pt2, color, box_thickness)
+            
+            # Draw label
+            label_pos = (x - half_size, y - half_size - 5)
+            cv2.putText(frame_with_overlay, str(bead_id + 1), 
+                       label_pos,
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        
+        return frame_with_overlay
+    
+    @staticmethod
+    def prepare_for_display(frame: np.ndarray, target_width: int, target_height: int,
+                           bead_positions: Optional[Dict[int, Tuple[int, int]]] = None) -> np.ndarray:
+        """
+        Prepare frame for display: resize and optionally add overlays.
+        
+        Args:
+            frame: Input frame
+            target_width: Target display width
+            target_height: Target display height
+            bead_positions: Optional bead positions to draw
+        
+        Returns:
+            Processed frame ready for display
+        """
+        if frame is None or frame.size == 0:
+            return frame
+        
+        # Add overlays first (on full resolution for accuracy)
+        if bead_positions:
+            frame = FrameProcessor.draw_bead_overlays(frame, bead_positions)
+        
+        # Then resize for display
+        resized, _ = FrameProcessor.resize_to_fit(frame, target_width, target_height)
+        
+        return resized
     
     @staticmethod
     def extract_roi(frame: np.ndarray, x: int, y: int, width: int, height: int) -> np.ndarray:

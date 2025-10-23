@@ -22,6 +22,11 @@ class VideoController(QObject):
         self.is_playing = False
         self.current_frame_index = 0
         
+        # Frame cache for better performance
+        self._frame_cache = {}
+        self._cache_size = 50
+        self._cache_order = []
+        
         # Timer for playback
         self.playback_timer = QTimer(self)
         self.playback_timer.timeout.connect(self._advance_frame)
@@ -30,6 +35,10 @@ class VideoController(QObject):
         """Load a video source."""
         # Clean up previous video
         self.cleanup()
+        
+        # Clear cache
+        self._frame_cache.clear()
+        self._cache_order.clear()
         
         # Set new video source
         self.video_source = video_source
@@ -55,10 +64,43 @@ class VideoController(QObject):
         """Get video FPS."""
         return self.video_source.fps if self.video_source else 30.0
     
+    def _get_frame_cached(self, frame_index: int) -> Optional[np.ndarray]:
+        """
+        Get frame with caching for better performance.
+        
+        Args:
+            frame_index: Frame index to retrieve
+        
+        Returns:
+            Frame data or None
+        """
+        # Check cache first
+        if frame_index in self._frame_cache:
+            return self._frame_cache[frame_index].copy()
+        
+        # Load from source
+        if not self.video_source:
+            return None
+        
+        frame = self.video_source.get_frame(frame_index)
+        
+        if frame is not None:
+            # Add to cache
+            self._frame_cache[frame_index] = frame.copy()
+            self._cache_order.append(frame_index)
+            
+            # Evict oldest if cache too large
+            if len(self._cache_order) > self._cache_size:
+                oldest = self._cache_order.pop(0)
+                if oldest in self._frame_cache:
+                    del self._frame_cache[oldest]
+        
+        return frame
+    
     def get_current_frame(self) -> Optional[np.ndarray]:
         """Get current frame data."""
         if self.video_source:
-            return self.video_source.get_frame(self.current_frame_index)
+            return self._get_frame_cached(self.current_frame_index)
         return None
     
     def seek_to_frame(self, frame_index: int):
@@ -69,8 +111,8 @@ class VideoController(QObject):
         # Clamp frame index
         frame_index = max(0, min(frame_index, self.video_source.total_frames - 1))
         
-        # Get frame
-        frame = self.video_source.get_frame(frame_index)
+        # Get frame using cache
+        frame = self._get_frame_cached(frame_index)
         if frame is not None:
             self.current_frame_index = frame_index
             self.frame_changed.emit(frame_index, frame)
@@ -127,6 +169,10 @@ class VideoController(QObject):
     def cleanup(self):
         """Clean up resources."""
         self.pause()
+        
+        # Clear cache
+        self._frame_cache.clear()
+        self._cache_order.clear()
         
         if self.video_source:
             self.video_source.cleanup()

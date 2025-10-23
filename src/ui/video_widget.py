@@ -180,9 +180,11 @@ class VideoWidget(QGroupBox):
         # Store original frame
         self.last_displayed_frame = frame_data.copy()
         
-        # Draw tracking overlays if enabled
+        # Draw tracking overlays if enabled using FrameProcessor
         if self.tracking_enabled and len(self.bead_positions) > 0:
-            frame_data = self._draw_tracking_overlays(frame_data)
+            frame_data = FrameProcessor.draw_bead_overlays(
+                frame_data, self.bead_positions, box_size=40, box_thickness=2
+            )
         
         # Display the frame
         self._display_frame(frame_data)
@@ -194,28 +196,11 @@ class VideoWidget(QGroupBox):
         self._update_frame_info(frame_index)
     
     def _draw_tracking_overlays(self, frame: np.ndarray) -> np.ndarray:
-        """Draw numbered squares around tracked beads."""
-        frame_with_overlay = frame.copy()
-        
-        for bead_id, (x, y) in self.bead_positions.items():
-            # Draw square (20x20 pixels around center)
-            box_size = 20
-            pt1 = (x - box_size, y - box_size)
-            pt2 = (x + box_size, y + box_size)
-            
-            # Different colors for different beads
-            colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), 
-                     (255, 0, 255), (0, 255, 255), (255, 128, 0), (128, 0, 255)]
-            color = colors[bead_id % len(colors)]
-            
-            cv2.rectangle(frame_with_overlay, pt1, pt2, color, 2)
-            
-            # Draw bead number
-            cv2.putText(frame_with_overlay, str(bead_id + 1), 
-                       (x - 10, y - box_size - 5),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-        
-        return frame_with_overlay
+        """
+        DEPRECATED: Use FrameProcessor.draw_bead_overlays instead.
+        Keeping for backward compatibility.
+        """
+        return FrameProcessor.draw_bead_overlays(frame, self.bead_positions, box_size=40, box_thickness=2)
     
     def _on_video_clicked(self, display_x: int, display_y: int):
         """Handle clicks on the video display."""
@@ -324,15 +309,22 @@ class VideoWidget(QGroupBox):
         label_size = self.video_label.size()
         label_w, label_h = label_size.width(), label_size.height()
         
-        # Use FrameProcessor to resize frame
-        frame_resized = FrameProcessor.resize_to_fit(frame, label_w, label_h)
+        if label_w <= 0 or label_h <= 0:
+            return
+        
+        # Use FrameProcessor to resize frame (returns tuple now)
+        frame_resized, _ = FrameProcessor.resize_to_fit(frame, label_w, label_h)
         
         # Convert to QPixmap
-        height, width, channel = frame_resized.shape
-        bytes_per_line = 3 * width
-        q_image = QImage(frame_resized.data, width, height, bytes_per_line, QImage.Format_RGB888)
-        pixmap = QPixmap.fromImage(q_image)
+        height, width = frame_resized.shape[:2]
+        if len(frame_resized.shape) == 3:
+            bytes_per_line = 3 * width
+            q_image = QImage(frame_resized.data, width, height, bytes_per_line, QImage.Format_RGB888)
+        else:
+            bytes_per_line = width
+            q_image = QImage(frame_resized.data, width, height, bytes_per_line, QImage.Format_Grayscale8)
         
+        pixmap = QPixmap.fromImage(q_image)
         self.video_label.setPixmap(pixmap)
 
     def _on_play_button_clicked(self):

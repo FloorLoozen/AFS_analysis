@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
     QLabel, QMessageBox, QFileDialog, QSpinBox, QGroupBox, QFormLayout
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 import numpy as np
 from pathlib import Path
 
@@ -21,11 +21,18 @@ class XYTracesTab(QWidget):
         self.video_widget = None
         self.tracker = BeadTracker(window_size=40)
         self.is_tracking = False
+        self.is_paused = False
         self.is_selecting = False
         self.is_validating = False
         self.next_bead_id = 0
         self.detected_positions = []
         self.current_hdf5_path = None
+        
+        # Tracking state
+        self.current_tracking_frame = 0
+        self.total_tracking_frames = 0
+        self.tracking_timer = QTimer()
+        self.tracking_timer.timeout.connect(self._process_next_frame)
         
         self._init_ui()
     
@@ -103,6 +110,12 @@ class XYTracesTab(QWidget):
         self.start_tracking_button.clicked.connect(self._on_start_tracking_clicked)
         button_row2.addWidget(self.start_tracking_button)
         
+        self.pause_button = QPushButton("Pause")
+        self.pause_button.setEnabled(False)
+        self.pause_button.setFixedWidth(60)
+        self.pause_button.clicked.connect(self._on_pause_tracking_clicked)
+        button_row2.addWidget(self.pause_button)
+        
         self.save_button = QPushButton("Save")
         self.save_button.setEnabled(False)
         self.save_button.setFixedWidth(60)
@@ -127,24 +140,48 @@ class XYTracesTab(QWidget):
         controls_group.setLayout(controls_layout)
         layout.addWidget(controls_group)
         
-        # Status display
+        # Status display - matching Info tab style exactly
         status_group = QGroupBox("Status")
-        status_layout = QVBoxLayout()
-        
-        self.info_label = QLabel("Load a video file to begin")
-        self.info_label.setWordWrap(True)
-        self.info_label.setStyleSheet("padding: 5px;")
-        status_layout.addWidget(self.info_label)
-        
-        self.status_label = QLabel("")
-        self.status_label.setStyleSheet("color: #666; font-style: italic; padding: 5px;")
-        self.status_label.setWordWrap(True)
-        status_layout.addWidget(self.status_label)
-        
-        status_group.setLayout(status_layout)
+        self.status_layout = QFormLayout(status_group)
+        self.status_layout.setContentsMargins(8, 8, 8, 8)
+        self.status_layout.setSpacing(5)
+        self.status_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         layout.addWidget(status_group)
         
         layout.addStretch()
+    
+    def _add_status_row(self, label_text, value_text=""):
+        """Add a label-value row to the status layout (matching info tab style)."""
+        # Label
+        label = QLabel(label_text)
+        label.setStyleSheet("color: #666;")
+        
+        # Value
+        value = QLabel(value_text)
+        value.setWordWrap(True)
+        value.setStyleSheet("color: #222;")
+        
+        # Add to form layout
+        self.status_layout.addRow(label, value)
+        
+        return value
+    
+    def _clear_status(self):
+        """Clear all rows from status layout."""
+        while self.status_layout.count():
+            item = self.status_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+    
+    def _update_status(self, info_text="", status_text=""):
+        """Update status display with consistent formatting."""
+        self._clear_status()
+        
+        if info_text:
+            self._add_status_row("Info:", info_text)
+        
+        if status_text:
+            self._add_status_row("Status:", status_text)
     
     def set_video_widget(self, video_widget):
         """Set reference to video widget."""
@@ -166,11 +203,10 @@ class XYTracesTab(QWidget):
             # Check if tracking data exists
             if self.current_hdf5_path and TrackingDataIO.has_tracking_data(self.current_hdf5_path):
                 self.load_tracking_button.setEnabled(True)
-                self.info_label.setText("Previous tracking found - click Load")
-                self.status_label.setText("Data in /analysis/xy_tracking")
+                self._update_status("Previous tracking found - click Load", "Data in /analysis/xy_tracking")
             else:
                 self.load_tracking_button.setEnabled(False)
-                self.info_label.setText("Click Auto or Manual to begin")
+                self._update_status("Click Auto or Manual to begin", "")
         
         self._reset_tracking()
     
@@ -216,9 +252,9 @@ class XYTracesTab(QWidget):
             total_frames = self.video_widget.controller.get_total_frames()
             
             if num_tracked >= total_frames:
-                self.info_label.setText(f"Loaded {len(beads_data)} beads - Complete")
+                self._update_status(f"Loaded {len(beads_data)} beads - Complete", "")
             else:
-                self.info_label.setText(f"Loaded {len(beads_data)} beads - {num_tracked}/{total_frames} frames")
+                self._update_status(f"Loaded {len(beads_data)} beads", f"{num_tracked}/{total_frames} frames")
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load:\n{str(e)}")
@@ -264,7 +300,7 @@ class XYTracesTab(QWidget):
         self.start_tracking_button.setEnabled(True)
         self.clear_button.setEnabled(True)
         
-        self.info_label.setText(f"{len(self.detected_positions)} beads | R-click remove, L-click add")
+        self._update_status(f"{len(self.detected_positions)} beads detected", "R-click remove, L-click add")
     
     def _on_select_beads_clicked(self):
         """Manual bead selection."""
@@ -275,7 +311,7 @@ class XYTracesTab(QWidget):
             self.start_tracking_button.setEnabled(False)
             self.video_widget.set_click_to_select_mode(True)
             self.video_widget.set_tracking_enabled(True)
-            self.status_label.setText("Click beads")
+            self._update_status("Manual selection mode", "Click beads to add")
         else:
             # End selection
             self.is_selecting = False
@@ -286,7 +322,7 @@ class XYTracesTab(QWidget):
             if len(self.tracker.beads) > 0:
                 self.start_tracking_button.setEnabled(True)
                 self.clear_button.setEnabled(True)
-                self.status_label.setText(f"{len(self.tracker.beads)} beads selected")
+                self._update_status(f"{len(self.tracker.beads)} beads selected", "Ready to track")
     
     def _on_bead_clicked(self, x: int, y: int):
         """Add bead at clicked position."""
@@ -305,7 +341,7 @@ class XYTracesTab(QWidget):
         bead_positions = {bead['id']: bead['positions'][0] for bead in self.tracker.beads}
         self.video_widget.update_bead_positions(bead_positions)
         
-        self.status_label.setText(f"Total: {len(self.tracker.beads)} beads")
+        self._update_status(f"{len(self.tracker.beads)} beads", "Bead added")
     
     def _on_bead_right_clicked(self, x: int, y: int):
         """Remove bead at clicked position."""
@@ -327,7 +363,7 @@ class XYTracesTab(QWidget):
             bead_positions = {bead['id']: bead['positions'][0] for bead in self.tracker.beads}
             self.video_widget.update_bead_positions(bead_positions)
             
-            self.status_label.setText(f"Removed. Total: {len(self.tracker.beads)} beads")
+            self._update_status(f"{len(self.tracker.beads)} beads", "Bead removed")
     
     def _on_start_tracking_clicked(self):
         """Start or stop tracking."""
@@ -336,54 +372,106 @@ class XYTracesTab(QWidget):
         else:
             self._start_tracking()
     
+    def _on_pause_tracking_clicked(self):
+        """Pause or resume tracking."""
+        if self.is_paused:
+            self._resume_tracking()
+        else:
+            self._pause_tracking()
+    
     def _start_tracking(self):
-        """Track beads through video with auto-save."""
+        """Start tracking beads through video with auto-save."""
         if not self.video_widget or len(self.tracker.beads) == 0:
             return
         
-        self.is_tracking = True
-        self.start_tracking_button.setText("Stop Tracking")
-        self.select_beads_button.setEnabled(False)
-        
-        total_frames = self.video_widget.controller.get_total_frames()
+        num_beads = len(self.tracker.beads)
+        self.total_tracking_frames = self.video_widget.controller.get_total_frames()
         
         # Resume from last tracked frame
-        start_frame = len(self.tracker.beads[0]['positions']) if self.tracker.beads[0]['positions'] else 0
-        if start_frame > 1:
-            start_frame -= 1
+        self.current_tracking_frame = len(self.tracker.beads[0]['positions']) if self.tracker.beads[0]['positions'] else 0
+        if self.current_tracking_frame > 1:
+            self.current_tracking_frame -= 1
         
-        # Track frames
-        for frame_idx in range(start_frame + 1, total_frames):
-            self.video_widget.controller.seek_to_frame(frame_idx)
-            frame = self.video_widget.get_current_frame()
-            
-            if frame is not None:
-                results = self.tracker.track_frame(frame)
-                bead_positions = {bid: (x, y) for bid, x, y in results}
-                self.video_widget.update_bead_positions(bead_positions)
-            
-            # Auto-save every 100 frames
-            if frame_idx % 100 == 0 and self.current_hdf5_path:
-                self._save_tracking_to_hdf5()
-                self.status_label.setText(f"{frame_idx}/{total_frames} (saved)")
-            elif frame_idx % 10 == 0:
-                self.status_label.setText(f"{frame_idx}/{total_frames}")
-            
-            QWidget.repaint(self)
+        # Update UI
+        self.is_tracking = True
+        self.is_paused = False
+        self.start_tracking_button.setText("Stop")
+        self.start_tracking_button.setEnabled(True)
+        self.pause_button.setText("Pause")
+        self.pause_button.setEnabled(True)
+        self.select_beads_button.setEnabled(False)
+        
+        # Show initial status with bead count
+        self._update_status(f"Starting: {num_beads} beads", f"Frame 0/{self.total_tracking_frames}")
+        
+        # Start timer (process one frame every 10ms for responsive UI)
+        self.tracking_timer.start(10)
+    
+    def _pause_tracking(self):
+        """Pause tracking."""
+        self.is_paused = True
+        self.tracking_timer.stop()
+        self.pause_button.setText("Resume")
+        num_beads = len(self.tracker.beads)
+        self._update_status(f"Paused: {num_beads} beads", f"Frame {self.current_tracking_frame}/{self.total_tracking_frames}")
+    
+    def _resume_tracking(self):
+        """Resume tracking."""
+        self.is_paused = False
+        self.pause_button.setText("Pause")
+        self.tracking_timer.start(10)
+        num_beads = len(self.tracker.beads)
+        self._update_status(f"Resuming: {num_beads} beads", f"Frame {self.current_tracking_frame}/{self.total_tracking_frames}")
+    
+    def _process_next_frame(self):
+        """Process one frame (called by timer)."""
+        if self.current_tracking_frame >= self.total_tracking_frames:
+            # Tracking complete
+            self._finish_tracking()
+            return
+        
+        # Process frame
+        self.video_widget.controller.seek_to_frame(self.current_tracking_frame)
+        frame = self.video_widget.get_current_frame()
+        
+        if frame is not None:
+            results = self.tracker.track_frame(frame)
+            bead_positions = {bid: (x, y) for bid, x, y in results}
+            self.video_widget.update_bead_positions(bead_positions)
+        
+        # Update status
+        num_beads = len(self.tracker.beads)
+        if self.current_tracking_frame % 100 == 0 and self.current_hdf5_path:
+            self._save_tracking_to_hdf5()
+            self._update_status(f"Tracking: {num_beads} beads", f"Frame {self.current_tracking_frame}/{self.total_tracking_frames} (saved)")
+        elif self.current_tracking_frame % 10 == 0:
+            self._update_status(f"Tracking: {num_beads} beads", f"Frame {self.current_tracking_frame}/{self.total_tracking_frames}")
+        
+        self.current_tracking_frame += 1
+    
+    def _finish_tracking(self):
+        """Complete tracking and save final data."""
+        self.tracking_timer.stop()
         
         # Final save
         if self.current_hdf5_path:
             self._save_tracking_to_hdf5()
         
-        self.status_label.setText(f"Complete: {len(self.tracker.beads)} beads, {total_frames} frames")
+        num_beads = len(self.tracker.beads)
+        self._update_status(f"Complete: {num_beads} beads", f"All {self.total_tracking_frames} frames tracked")
+        
         self.export_button.setEnabled(True)
         self.save_button.setEnabled(True)
         self._stop_tracking()
     
     def _stop_tracking(self):
         """Stop tracking."""
+        self.tracking_timer.stop()
         self.is_tracking = False
+        self.is_paused = False
         self.start_tracking_button.setText("Start Tracking")
+        self.pause_button.setText("Pause")
+        self.pause_button.setEnabled(False)
         self.select_beads_button.setEnabled(True)
     
     def _save_tracking_to_hdf5(self):
@@ -472,5 +560,4 @@ class XYTracesTab(QWidget):
         self.clear_button.setEnabled(False)
         self.export_button.setEnabled(False)
         self.save_button.setEnabled(False)
-        self.status_label.setText("")
-        self.info_label.setText("Load a video file to begin")
+        self._clear_status()
