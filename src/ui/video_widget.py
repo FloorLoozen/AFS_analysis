@@ -366,6 +366,12 @@ class VideoWidget(QGroupBox):
         """Get video metadata."""
         return self.controller.get_metadata()
     
+    def get_hdf5_file(self):
+        """Get the HDF5 file handle from the video source."""
+        if self.controller and self.controller.video_source:
+            return self.controller.video_source.hdf5_file
+        return None
+    
     def get_current_frame(self) -> np.ndarray:
         """Get current frame data."""
         return self.controller.get_current_frame()

@@ -198,12 +198,12 @@ class XYTracesTab(QWidget):
         # Get video file path
         if self.video_widget:
             metadata = self.video_widget.get_metadata()
-            self.current_hdf5_path = metadata.get('filename', None)
+            self.current_hdf5_path = metadata.get('file_path', None)
             
             # Check if tracking data exists
             if self.current_hdf5_path and TrackingDataIO.has_tracking_data(self.current_hdf5_path):
                 self.load_tracking_button.setEnabled(True)
-                self._update_status("Previous tracking found - click Load", "Data in /analysis/xy_tracking")
+                self._update_status("Previous tracking found - click Load", "Data in /analysed_data/xy_tracking")
             else:
                 self.load_tracking_button.setEnabled(False)
                 self._update_status("Click Auto or Manual to begin", "")
@@ -476,17 +476,31 @@ class XYTracesTab(QWidget):
     
     def _save_tracking_to_hdf5(self):
         """Save tracking data to HDF5."""
-        if not self.current_hdf5_path or len(self.tracker.beads) == 0:
-            print("[XY_TAB] Cannot save - no path or no beads")
+        if not self.current_hdf5_path:
+            print("[XY_TAB] Cannot save - no HDF5 path")
+            return
+            
+        if len(self.tracker.beads) == 0:
+            print("[XY_TAB] Cannot save - no beads in tracker")
             return
         
-        print(f"[XY_TAB] Saving {len(self.tracker.beads)} beads")
+        print(f"[XY_TAB] Saving {len(self.tracker.beads)} beads to {self.current_hdf5_path}")
         try:
             metadata = {
                 'num_beads': len(self.tracker.beads),
                 'num_frames': len(self.tracker.beads[0]['positions']) if self.tracker.beads else 0
             }
-            TrackingDataIO.save_to_hdf5(self.current_hdf5_path, self.tracker.beads, metadata)
+            
+            # Get the already-open HDF5 file handle from video widget
+            hdf5_handle = self.video_widget.get_hdf5_file() if self.video_widget else None
+            
+            TrackingDataIO.save_to_hdf5(
+                self.current_hdf5_path, 
+                self.tracker.beads, 
+                metadata,
+                hdf5_file_handle=hdf5_handle
+            )
+            print(f"[XY_TAB] Save successful!")
         except Exception as e:
             print(f"[XY_TAB] Save error: {e}")
             import traceback
@@ -494,8 +508,22 @@ class XYTracesTab(QWidget):
     
     def _on_save_to_hdf5_clicked(self):
         """Manual save to HDF5."""
-        if not self.current_hdf5_path or len(self.tracker.beads) == 0:
-            QMessageBox.warning(self, "No Data", "No tracking data to save.")
+        print(f"[XY_TAB] Save button clicked. HDF5 path: {self.current_hdf5_path}")
+        print(f"[XY_TAB] Number of beads in tracker: {len(self.tracker.beads)}")
+        
+        if not self.current_hdf5_path:
+            QMessageBox.warning(self, "No File", "No HDF5 file loaded.")
+            return
+        
+        if len(self.tracker.beads) == 0:
+            # Check if data exists in HDF5 file already
+            if TrackingDataIO.has_tracking_data(self.current_hdf5_path):
+                QMessageBox.information(
+                    self, "Already Saved",
+                    f"Tracking data already saved to:\n/analysed_data/xy_tracking"
+                )
+            else:
+                QMessageBox.warning(self, "No Data", "No tracking data to save.\n\nPlease:\n1. Click 'Auto' or 'Manual' to detect beads\n2. Click 'Start Tracking' to track them")
             return
         
         try:
@@ -503,14 +531,22 @@ class XYTracesTab(QWidget):
             num_frames = len(self.tracker.beads[0]['positions']) if self.tracker.beads else 0
             QMessageBox.information(
                 self, "Saved",
-                f"Saved to /analysis/xy_tracking\n\nBeads: {len(self.tracker.beads)}\nFrames: {num_frames}"
+                f"Saved to /analysed_data/xy_tracking\n\nBeads: {len(self.tracker.beads)}\nFrames: {num_frames}"
             )
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed:\n{str(e)}")
     
     def _on_export_clicked(self):
         """Export tracking data to CSV."""
-        if not self.current_hdf5_path or len(self.tracker.beads) == 0:
+        if not self.current_hdf5_path:
+            QMessageBox.warning(self, "No File", "No HDF5 file loaded.")
+            return
+        
+        # Check if we have data in tracker or in HDF5 file
+        has_data_in_memory = len(self.tracker.beads) > 0
+        has_data_in_file = TrackingDataIO.has_tracking_data(self.current_hdf5_path)
+        
+        if not has_data_in_memory and not has_data_in_file:
             QMessageBox.warning(self, "No Data", "No tracking data to export.")
             return
         
@@ -522,7 +558,11 @@ class XYTracesTab(QWidget):
         
         if file_path:
             try:
-                self._save_tracking_to_hdf5()  # Save to HDF5 first
+                # Save to HDF5 first if we have data in memory
+                if has_data_in_memory:
+                    self._save_tracking_to_hdf5()
+                
+                # Export from HDF5 to CSV
                 TrackingDataIO.export_to_csv(self.current_hdf5_path, file_path)
                 QMessageBox.information(self, "Exported", f"Exported to:\n{file_path}")
             except Exception as e:

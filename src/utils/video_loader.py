@@ -22,7 +22,8 @@ class HDF5VideoSource:
     def _load(self, file_path: str):
         """Load HDF5 video file."""
         try:
-            self.hdf5_file = h5py.File(file_path, 'r')
+            # Open in read-write mode to allow saving tracking data later
+            self.hdf5_file = h5py.File(file_path, 'r+')
             
             # Try to find video data in common locations
             video_paths = ['raw_data/main_video', 'data/main_video', 'main_video', 'video']
