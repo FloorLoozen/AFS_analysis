@@ -183,7 +183,7 @@ class VideoWidget(QGroupBox):
         # Draw tracking overlays if enabled using FrameProcessor
         if self.tracking_enabled and len(self.bead_positions) > 0:
             frame_data = FrameProcessor.draw_bead_overlays(
-                frame_data, self.bead_positions, box_size=40, box_thickness=2
+                frame_data, self.bead_positions, box_size=24, box_thickness=1
             )
         
         # Display the frame
@@ -200,7 +200,7 @@ class VideoWidget(QGroupBox):
         DEPRECATED: Use FrameProcessor.draw_bead_overlays instead.
         Keeping for backward compatibility.
         """
-        return FrameProcessor.draw_bead_overlays(frame, self.bead_positions, box_size=40, box_thickness=2)
+        return FrameProcessor.draw_bead_overlays(frame, self.bead_positions, box_size=24, box_thickness=1)
     
     def _on_video_clicked(self, display_x: int, display_y: int):
         """Handle clicks on the video display."""

@@ -48,7 +48,7 @@ class FrameProcessor:
     
     @staticmethod
     def draw_bead_overlays(frame: np.ndarray, bead_positions: Dict[int, Tuple[int, int]], 
-                          box_size: int = 30, box_thickness: int = 2) -> np.ndarray:
+                          box_size: int = 30, box_thickness: int = 1) -> np.ndarray:
         """
         Draw tracking overlays on frame.
         
@@ -81,7 +81,7 @@ class FrameProcessor:
             label_pos = (x - half_size, y - half_size - 5)
             cv2.putText(frame_with_overlay, str(bead_id + 1), 
                        label_pos,
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
         
         return frame_with_overlay
     
