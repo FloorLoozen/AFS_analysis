@@ -4,6 +4,7 @@ import h5py
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Any
 from pathlib import Path
+from src.utils.logger import Logger
 
 
 class TrackingDataIO:
@@ -22,11 +23,11 @@ class TrackingDataIO:
             hdf5_file_handle: Optional already-open HDF5 file handle
         """
         if not beads_data:
-            print("⚠ No bead data to save")
+            Logger.debug("No bead data to save", "TRACKING_IO")
             return
         
         try:
-            print(f"[SAVE] Saving to HDF5: {hdf5_path}")
+            Logger.debug(f"Saving to HDF5: {hdf5_path}", "TRACKING_IO")
             
             # Use provided file handle or open new one
             if hdf5_file_handle is not None:
@@ -39,24 +40,19 @@ class TrackingDataIO:
             try:
                 # Create analysed_data group if it doesn't exist
                 if 'analysed_data' not in f:
-                    print("[SAVE] Creating /analysed_data group")
                     analysis_group = f.create_group('analysed_data')
                 else:
-                    print("[SAVE] Using existing /analysed_data group")
                     analysis_group = f['analysed_data']
                 
                 # Create or overwrite xy_tracking group
                 if 'xy_tracking' in analysis_group:
-                    print("[SAVE] Deleting existing xy_tracking group")
                     del analysis_group['xy_tracking']
                 
-                print("[SAVE] Creating /analysed_data/xy_tracking group")
                 xy_group = analysis_group.create_group('xy_tracking')
                 
-                # Prepare tracking data as structured array
+                # Prepare tracking data
                 max_frames = max(len(bead['positions']) for bead in beads_data)
                 num_beads = len(beads_data)
-                print(f"[SAVE] Preparing data: {num_beads} beads, {max_frames} frames")
                 
                 # Create dataset: shape (num_frames, num_beads, 2) for (x, y) positions
                 tracking_data = np.full((max_frames, num_beads, 2), -1, dtype=np.int32)
@@ -68,7 +64,6 @@ class TrackingDataIO:
                         tracking_data[frame_idx, bead_idx, 1] = y
                 
                 # Save positions dataset
-                print("[SAVE] Creating positions dataset")
                 positions_dataset = xy_group.create_dataset('positions', data=tracking_data)
                 
                 # Save metadata as group attributes
@@ -95,7 +90,7 @@ class TrackingDataIO:
                         template_name = f'bead_{bead_idx}_template'
                         xy_group.create_dataset(template_name, data=bead['template'])
                 
-                print(f"✓ Saved to /analysed_data/xy_tracking/: {num_beads} beads, {max_frames} frames")
+                Logger.success(f"Saved {num_beads} beads, {max_frames} frames to /analysed_data/xy_tracking/", "TRACKING_IO")
                 
             finally:
                 # Only close if we opened it ourselves
@@ -103,7 +98,7 @@ class TrackingDataIO:
                     f.close()
                 
         except Exception as e:
-            print(f"✗ Error saving tracking data: {e}")
+            Logger.error(f"Error saving tracking data: {e}", "TRACKING_IO")
             import traceback
             traceback.print_exc()
             raise
@@ -123,57 +118,44 @@ class TrackingDataIO:
         metadata = {}
         
         try:
-            print(f"[LOAD] Opening HDF5: {hdf5_path}")
+            Logger.debug(f"Loading from HDF5: {hdf5_path}", "TRACKING_IO")
             with h5py.File(hdf5_path, 'r') as f:
-                if 'analysed_data' not in f:
-                    # Group doesn't exist yet - this is normal for new files
+                if 'analysed_data' not in f or 'xy_tracking' not in f['analysed_data']:
                     return beads_data, metadata
                 
-                if 'xy_tracking' not in f['analysed_data']:
-                    # No tracking data yet - this is normal
-                    return beads_data, metadata
-                
-                print("[LOAD] Found /analysed_data/xy_tracking/")
                 xy_group = f['analysed_data']['xy_tracking']
                 
                 # Check if it's a group (new format) or dataset (old format)
                 if isinstance(xy_group, h5py.Group):
-                    # New format: xy_tracking is a group with positions dataset
+                    # New format
                     if 'positions' not in xy_group:
-                        print("[LOAD] No positions dataset found in xy_tracking group")
                         return beads_data, metadata
                     
                     tracking_data = xy_group['positions'][:]
-                    print(f"[LOAD] Dataset shape: {tracking_data.shape}")
                     
                     # Load metadata from group attributes
                     for key, value in xy_group.attrs.items():
                         metadata[key] = value
                     
                     num_beads = int(metadata.get('num_beads', tracking_data.shape[1]))
-                    print(f"[LOAD] Loading {num_beads} beads")
                     
                     # Reconstruct bead dictionaries
                     for bead_idx in range(num_beads):
-                        # Extract positions for this bead
                         positions = []
                         for frame_idx in range(tracking_data.shape[0]):
                             x, y = tracking_data[frame_idx, bead_idx, :]
-                            if x >= 0 and y >= 0:  # Valid position (not -1 fill value)
+                            if x >= 0 and y >= 0:
                                 positions.append((int(x), int(y)))
                             else:
-                                break  # No more valid frames for this bead
+                                break
                         
                         if not positions:
-                            print(f"[LOAD] Bead {bead_idx} has no valid positions, skipping")
                             continue
                         
-                        # Get bead metadata
                         bead_id = int(metadata.get(f'bead_{bead_idx}_id', bead_idx))
                         initial_x = int(metadata.get(f'bead_{bead_idx}_initial_x', positions[0][0]))
                         initial_y = int(metadata.get(f'bead_{bead_idx}_initial_y', positions[0][1]))
                         
-                        # Load template if available
                         template = None
                         template_name = f'bead_{bead_idx}_template'
                         if template_name in xy_group:
@@ -188,18 +170,14 @@ class TrackingDataIO:
                         
                         beads_data.append(bead)
                 else:
-                    # Old format: xy_tracking is a dataset (backward compatibility)
+                    # Old format: backward compatibility
                     tracking_data = xy_group[:]
-                    print(f"[LOAD] Old format - Dataset shape: {tracking_data.shape}")
                     
-                    # Load metadata from dataset attributes
                     for key, value in xy_group.attrs.items():
                         metadata[key] = value
                     
                     num_beads = int(metadata.get('num_beads', tracking_data.shape[1]))
-                    print(f"[LOAD] Loading {num_beads} beads (old format)")
                     
-                    # Reconstruct bead dictionaries (same logic as before)
                     for bead_idx in range(num_beads):
                         positions = []
                         for frame_idx in range(tracking_data.shape[0]):
@@ -230,10 +208,10 @@ class TrackingDataIO:
                         
                         beads_data.append(bead)
                 
-                print(f"✓ Loaded {len(beads_data)} beads from /analysed_data/xy_tracking/")
+                Logger.success(f"Loaded {len(beads_data)} beads", "TRACKING_IO")
                 
         except Exception as e:
-            print(f"✗ Error loading tracking data: {e}")
+            Logger.error(f"Error loading tracking data: {e}", "TRACKING_IO")
             import traceback
             traceback.print_exc()
         
@@ -253,12 +231,11 @@ class TrackingDataIO:
         try:
             with h5py.File(hdf5_path, 'r') as f:
                 has_data = 'analysed_data' in f and 'xy_tracking' in f['analysed_data']
-                # Only print if data is found (silent check otherwise)
                 if has_data:
-                    print(f"[CHECK] Found existing tracking data in /analysed_data/xy_tracking")
+                    Logger.debug("Found existing tracking data", "TRACKING_IO")
                 return has_data
         except Exception as e:
-            print(f"[CHECK] Error checking tracking data: {e}")
+            Logger.error(f"Error checking tracking data: {e}", "TRACKING_IO")
             return False
     
     @staticmethod
@@ -276,7 +253,7 @@ class TrackingDataIO:
         if output_csv_path is None:
             output_csv_path = str(Path(hdf5_path).with_suffix('.csv'))
         
-        print(f"[EXPORT] Loading data from HDF5")
+        Logger.debug("Loading data from HDF5 for export", "TRACKING_IO")
         beads_data, metadata = TrackingDataIO.load_from_hdf5(hdf5_path)
         
         if not beads_data:
@@ -297,9 +274,9 @@ class TrackingDataIO:
                             fps = float(f[path].attrs['fps'])
                             break
         except Exception as e:
-            print(f"[EXPORT] Could not read FPS, using default 30.0: {e}")
+            Logger.debug(f"Could not read FPS, using default: {e}", "TRACKING_IO")
         
-        print(f"[EXPORT] Creating CSV: {output_csv_path} (FPS: {fps})")
+        Logger.debug(f"Exporting to CSV with FPS={fps}", "TRACKING_IO")
         # Create CSV content
         import csv
         with open(output_csv_path, 'w', newline='') as csvfile:
@@ -327,5 +304,5 @@ class TrackingDataIO:
                         row.extend(['', ''])  # Empty if this bead doesn't have this frame
                 writer.writerow(row)
         
-        print(f"✓ Exported {len(beads_data)} beads to CSV")
+        Logger.success(f"Exported {len(beads_data)} beads to {output_csv_path}", "TRACKING_IO")
         return output_csv_path

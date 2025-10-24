@@ -1,5 +1,6 @@
 """Video player widget for AFS Analysis."""
 
+from typing import Optional
 from PyQt5.QtWidgets import (
     QGroupBox, QVBoxLayout, QHBoxLayout, QPushButton,
     QSlider, QLabel, QFileDialog, QFrame, QSizePolicy
@@ -195,13 +196,6 @@ class VideoWidget(QGroupBox):
         # Update info
         self._update_frame_info(frame_index)
     
-    def _draw_tracking_overlays(self, frame: np.ndarray) -> np.ndarray:
-        """
-        DEPRECATED: Use FrameProcessor.draw_bead_overlays instead.
-        Keeping for backward compatibility.
-        """
-        return FrameProcessor.draw_bead_overlays(frame, self.bead_positions, box_size=24, box_thickness=1)
-    
     def _on_video_clicked(self, display_x: int, display_y: int):
         """Handle clicks on the video display."""
         if self.click_to_select_mode and self.last_displayed_frame is not None:
@@ -372,6 +366,6 @@ class VideoWidget(QGroupBox):
             return self.controller.video_source.hdf5_file
         return None
     
-    def get_current_frame(self) -> np.ndarray:
+    def get_current_frame(self) -> Optional[np.ndarray]:
         """Get current frame data."""
         return self.controller.get_current_frame()

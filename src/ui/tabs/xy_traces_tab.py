@@ -10,6 +10,7 @@ from pathlib import Path
 
 from src.utils.analysis import BeadTracker, detect_beads_auto
 from src.utils.tracking_io import TrackingDataIO
+from src.utils.logger import Logger
 
 
 class XYTracesTab(QWidget):
@@ -436,10 +437,13 @@ class XYTracesTab(QWidget):
         
         if frame is not None:
             results = self.tracker.track_frame(frame)
-            bead_positions = {bid: (x, y) for bid, x, y in results}
-            self.video_widget.update_bead_positions(bead_positions)
+            
+            # Only update display every 5 frames for better performance
+            if self.current_tracking_frame % 5 == 0:
+                bead_positions = {bid: (x, y) for bid, x, y in results}
+                self.video_widget.update_bead_positions(bead_positions)
         
-        # Update status
+        # Update status and save
         num_beads = len(self.tracker.beads)
         if self.current_tracking_frame % 100 == 0 and self.current_hdf5_path:
             self._save_tracking_to_hdf5()
@@ -477,14 +481,14 @@ class XYTracesTab(QWidget):
     def _save_tracking_to_hdf5(self):
         """Save tracking data to HDF5."""
         if not self.current_hdf5_path:
-            print("[XY_TAB] Cannot save - no HDF5 path")
+            Logger.debug("Cannot save - no HDF5 path", "XY_TAB")
             return
             
         if len(self.tracker.beads) == 0:
-            print("[XY_TAB] Cannot save - no beads in tracker")
+            Logger.debug("Cannot save - no beads in tracker", "XY_TAB")
             return
         
-        print(f"[XY_TAB] Saving {len(self.tracker.beads)} beads to {self.current_hdf5_path}")
+        Logger.info(f"Saving {len(self.tracker.beads)} beads", "XY_TAB")
         try:
             metadata = {
                 'num_beads': len(self.tracker.beads),
@@ -500,17 +504,13 @@ class XYTracesTab(QWidget):
                 metadata,
                 hdf5_file_handle=hdf5_handle
             )
-            print(f"[XY_TAB] Save successful!")
         except Exception as e:
-            print(f"[XY_TAB] Save error: {e}")
+            Logger.error(f"Save error: {e}", "XY_TAB")
             import traceback
             traceback.print_exc()
     
     def _on_save_to_hdf5_clicked(self):
         """Manual save to HDF5."""
-        print(f"[XY_TAB] Save button clicked. HDF5 path: {self.current_hdf5_path}")
-        print(f"[XY_TAB] Number of beads in tracker: {len(self.tracker.beads)}")
-        
         if not self.current_hdf5_path:
             QMessageBox.warning(self, "No File", "No HDF5 file loaded.")
             return
