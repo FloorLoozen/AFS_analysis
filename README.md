@@ -5,7 +5,7 @@ Video analysis application for Atomic Force Spectroscopy HDF5 data with XY bead 
 ## Features
 
 ### Video Player
-- **HDF5 Support**: Read video from AFS_acquisition files (`/data/main_video`)
+- **HDF5 Support**: Read video from AFS_acquisition files (`/raw_data/main_video` or `/data/main_video` for backward compatibility)
 - **Playback Controls**: Play, pause, stop with frame-by-frame navigation
 - **Metadata Display**: Show recording info (frames, FPS, duration)
 
@@ -15,7 +15,7 @@ Video analysis application for Atomic Force Spectroscopy HDF5 data with XY bead 
 - **Template Matching**: Track bead positions across all frames
 - **Auto-Save**: Saves every 100 frames during tracking
 - **Resume Capability**: Continue from last tracked frame
-- **HDF5 Storage**: Data saved to `/analysis/xy_tracking` in source file
+- **HDF5 Storage**: Data saved to `/analysed_data/xy_tracking` in source file
 - **CSV Export**: Export tracking data for external analysis
 
 ## Installation
@@ -41,10 +41,11 @@ python src/main.py
 ## HDF5 Structure
 
 **Input** (from AFS_acquisition):
-- `/data/main_video` - Video dataset (frames, height, width, channels)
+- `/raw_data/main_video` - Video dataset (frames, height, width, channels)
+  - Also supports `/data/main_video` for backward compatibility
 
 **Output** (created by AFS_analysis):
-- `/analysis/xy_tracking` - Tracking positions (frames, beads, xy)
+- `/analysed_data/xy_tracking` - Tracking positions (frames, beads, xy)
 - Templates and metadata stored as attributes/datasets
 
 ## Architecture

@@ -25,7 +25,7 @@ class HDF5VideoSource:
             self.hdf5_file = h5py.File(file_path, 'r')
             
             # Try to find video data in common locations
-            video_paths = ['data/main_video', 'main_video', 'video']
+            video_paths = ['raw_data/main_video', 'data/main_video', 'main_video', 'video']
             
             for path in video_paths:
                 if path in self.hdf5_file:
@@ -107,11 +107,17 @@ class HDF5VideoSource:
         # Add video dataset attributes
         metadata.update(self.metadata)
         
-        # Add data group attributes if available
+        # Add raw_data group attributes if available (or data for backward compatibility)
         if self.hdf5_file is not None:
             try:
-                if 'data' in self.hdf5_file:
+                # Try raw_data first, then data for backward compatibility
+                data_group = None
+                if 'raw_data' in self.hdf5_file:
+                    data_group = self.hdf5_file['raw_data']
+                elif 'data' in self.hdf5_file:
                     data_group = self.hdf5_file['data']
+                
+                if data_group is not None:
                     for key in data_group.attrs.keys():
                         if key not in metadata:
                             value = data_group.attrs[key]

@@ -7,13 +7,13 @@ from pathlib import Path
 
 
 class TrackingDataIO:
-    """Handle saving and loading tracking data to/from HDF5 files in analysis folder."""
+    """Handle saving and loading tracking data to/from HDF5 files in analysed_data folder."""
     
     @staticmethod
     def save_to_hdf5(hdf5_path: str, beads_data: List[Dict[str, Any]], 
                      metadata: Optional[Dict[str, Any]] = None):
         """
-        Save tracking data to HDF5 file under /analysis/xy_tracking.
+        Save tracking data to HDF5 file under /analysed_data/xy_tracking.
         
         Args:
             hdf5_path: Path to HDF5 file
@@ -27,13 +27,13 @@ class TrackingDataIO:
         try:
             print(f"[SAVE] Opening HDF5: {hdf5_path}")
             with h5py.File(hdf5_path, 'a') as f:
-                # Create analysis group if it doesn't exist
-                if 'analysis' not in f:
-                    print("[SAVE] Creating /analysis group")
-                    analysis_group = f.create_group('analysis')
+                # Create analysed_data group if it doesn't exist
+                if 'analysed_data' not in f:
+                    print("[SAVE] Creating /analysed_data group")
+                    analysis_group = f.create_group('analysed_data')
                 else:
-                    print("[SAVE] Using existing /analysis group")
-                    analysis_group = f['analysis']
+                    print("[SAVE] Using existing /analysed_data group")
+                    analysis_group = f['analysed_data']
                 
                 # Create or overwrite xy_tracking dataset
                 if 'xy_tracking' in analysis_group:
@@ -84,7 +84,7 @@ class TrackingDataIO:
                             del analysis_group[template_name]
                         analysis_group.create_dataset(template_name, data=bead['template'])
                 
-                print(f"✓ Saved to /analysis/xy_tracking: {num_beads} beads, {max_frames} frames")
+                print(f"✓ Saved to /analysed_data/xy_tracking: {num_beads} beads, {max_frames} frames")
                 
         except Exception as e:
             print(f"✗ Error saving tracking data: {e}")
@@ -95,7 +95,7 @@ class TrackingDataIO:
     @staticmethod
     def load_from_hdf5(hdf5_path: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
-        Load tracking data from HDF5 file from /analysis/xy_tracking.
+        Load tracking data from HDF5 file from /analysed_data/xy_tracking.
         
         Args:
             hdf5_path: Path to HDF5 file
@@ -109,16 +109,16 @@ class TrackingDataIO:
         try:
             print(f"[LOAD] Opening HDF5: {hdf5_path}")
             with h5py.File(hdf5_path, 'r') as f:
-                if 'analysis' not in f:
-                    print("[LOAD] No /analysis group found")
+                if 'analysed_data' not in f:
+                    print("[LOAD] No /analysed_data group found")
                     return beads_data, metadata
                 
-                if 'xy_tracking' not in f['analysis']:
-                    print("[LOAD] No /analysis/xy_tracking dataset found")
+                if 'xy_tracking' not in f['analysed_data']:
+                    print("[LOAD] No /analysed_data/xy_tracking dataset found")
                     return beads_data, metadata
                 
-                print("[LOAD] Found /analysis/xy_tracking")
-                tracking_dataset = f['analysis']['xy_tracking']
+                print("[LOAD] Found /analysed_data/xy_tracking")
+                tracking_dataset = f['analysed_data']['xy_tracking']
                 tracking_data = tracking_dataset[:]  # Shape: (num_frames, num_beads, 2)
                 print(f"[LOAD] Dataset shape: {tracking_data.shape}")
                 
@@ -152,8 +152,8 @@ class TrackingDataIO:
                     # Load template if available
                     template = None
                     template_name = f'xy_tracking_bead_{bead_idx}_template'
-                    if template_name in f['analysis']:
-                        template = f['analysis'][template_name][:]
+                    if template_name in f['analysed_data']:
+                        template = f['analysed_data'][template_name][:]
                     
                     bead = {
                         'id': bead_id,
@@ -164,7 +164,7 @@ class TrackingDataIO:
                     
                     beads_data.append(bead)
                 
-                print(f"✓ Loaded {len(beads_data)} beads from /analysis/xy_tracking")
+                print(f"✓ Loaded {len(beads_data)} beads from /analysed_data/xy_tracking")
                 
         except Exception as e:
             print(f"✗ Error loading tracking data: {e}")
@@ -176,7 +176,7 @@ class TrackingDataIO:
     @staticmethod
     def has_tracking_data(hdf5_path: str) -> bool:
         """
-        Check if HDF5 file contains tracking data in /analysis/xy_tracking.
+        Check if HDF5 file contains tracking data in /analysed_data/xy_tracking.
         
         Args:
             hdf5_path: Path to HDF5 file
@@ -186,7 +186,7 @@ class TrackingDataIO:
         """
         try:
             with h5py.File(hdf5_path, 'r') as f:
-                has_data = 'analysis' in f and 'xy_tracking' in f['analysis']
+                has_data = 'analysed_data' in f and 'xy_tracking' in f['analysed_data']
                 print(f"[CHECK] Has tracking data: {has_data}")
                 return has_data
         except Exception as e:
