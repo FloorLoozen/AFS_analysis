@@ -104,7 +104,7 @@ def detect_beads_auto(frame: np.ndarray, min_area: int = 50, max_area: int = 500
 
 
 class BeadTracker:
-    """Tracks multiple beads using template matching."""
+    """Tracks multiple beads using adaptive template matching."""
     
     def __init__(self, window_size: int = 40):
         """
@@ -147,18 +147,25 @@ class BeadTracker:
             'id': bead_id,
             'template': template_gray,
             'positions': [(x, y)],  # List of (x, y) positions for each frame
-            'initial_pos': (x, y)
+            'initial_pos': (x, y),
+            'lost_frames': 0,  # Counter for consecutive lost frames
+            'last_good_match': 1.0  # Last good match score
         }
         
         self.beads.append(bead)
     
-    def track_frame(self, frame: np.ndarray, search_radius: int = 50) -> List[Tuple[int, int, int]]:
+    def track_frame(self, frame: np.ndarray, search_radius: int = 120, 
+                    min_match_score: float = 0.25, update_template: bool = True,
+                    max_lost_frames: int = 50) -> List[Tuple[int, int, int]]:
         """
-        Track all beads in a new frame.
+        Track all beads in a new frame with adaptive template matching.
         
         Args:
             frame: New frame to track beads in
-            search_radius: How far from last position to search
+            search_radius: How far from last position to search (increased default)
+            min_match_score: Minimum correlation score to accept (0-1, lowered for robustness)
+            update_template: Whether to update template with good matches
+            max_lost_frames: Maximum frames to keep searching before giving up
         
         Returns:
             List of (bead_id, x, y) positions
@@ -178,11 +185,17 @@ class BeadTracker:
             h, w = frame_gray.shape
             th, tw = template.shape
             
+            # Increase search radius if bead was recently lost
+            effective_radius = search_radius
+            if bead['lost_frames'] > 0:
+                # Expand search for lost beads - up to 3x the normal radius
+                effective_radius = min(search_radius * (1 + bead['lost_frames'] // 10), 300)
+            
             # Search region around last known position
-            x1 = max(0, last_x - search_radius)
-            y1 = max(0, last_y - search_radius)
-            x2 = min(w, last_x + search_radius + tw)
-            y2 = min(h, last_y + search_radius + th)
+            x1 = max(0, last_x - effective_radius)
+            y1 = max(0, last_y - effective_radius)
+            x2 = min(w, last_x + effective_radius + tw)
+            y2 = min(h, last_y + effective_radius + th)
             
             search_region = frame_gray[y1:y2, x1:x2]
             
@@ -190,15 +203,76 @@ class BeadTracker:
             if search_region.shape[0] < th or search_region.shape[1] < tw:
                 # Search region too small, use last position
                 new_x, new_y = last_x, last_y
+                match_score = bead.get('last_good_match', 0.0) * 0.95  # Decay confidence
             else:
-                result = cv2.matchTemplate(search_region, template, cv2.TM_CCOEFF_NORMED)
-                _, max_val, _, max_loc = cv2.minMaxLoc(result)
+                # Try multiple matching methods for robustness
+                result_normed = cv2.matchTemplate(search_region, template, cv2.TM_CCOEFF_NORMED)
+                _, max_val_normed, _, max_loc_normed = cv2.minMaxLoc(result_normed)
+                
+                # Also try TM_CCORR_NORMED for better handling of brightness changes
+                result_ccorr = cv2.matchTemplate(search_region, template, cv2.TM_CCORR_NORMED)
+                _, max_val_ccorr, _, max_loc_ccorr = cv2.minMaxLoc(result_ccorr)
+                
+                # Use the better match
+                if max_val_normed > max_val_ccorr:
+                    max_val = max_val_normed
+                    max_loc = max_loc_normed
+                else:
+                    max_val = max_val_ccorr
+                    max_loc = max_loc_ccorr
                 
                 # Convert to frame coordinates
-                new_x = x1 + max_loc[0] + tw // 2
-                new_y = y1 + max_loc[1] + th // 2
+                match_x = x1 + max_loc[0] + tw // 2
+                match_y = y1 + max_loc[1] + th // 2
+                match_score = max_val
+                
+                # Distance from last position - penalize large jumps between beads
+                dx = match_x - last_x
+                dy = match_y - last_y
+                distance = np.sqrt(dx*dx + dy*dy)
+                
+                # Adaptive threshold: lower for stationary beads, higher for moving
+                adaptive_threshold = min_match_score
+                if bead['lost_frames'] == 0 and distance < 20:
+                    # Bead moving slowly - be more strict
+                    adaptive_threshold = max(min_match_score, 0.4)
+                elif distance > effective_radius * 0.7:
+                    # Large jump - could be tracking wrong bead
+                    adaptive_threshold = max(min_match_score, 0.5)
+                
+                # Check if match is good enough
+                if match_score >= adaptive_threshold:
+                    # Good match - accept new position
+                    new_x, new_y = match_x, match_y
+                    
+                    # Update template if match is strong
+                    if update_template and match_score > 0.55:
+                        # Extract new template region
+                        ny1 = max(0, new_y - th // 2)
+                        ny2 = min(h, new_y + th // 2)
+                        nx1 = max(0, new_x - tw // 2)
+                        nx2 = min(w, new_x + tw // 2)
+                        
+                        new_template = frame_gray[ny1:ny2, nx1:nx2]
+                        
+                        # Adaptive template update: blend with old template
+                        if new_template.shape == template.shape:
+                            # Higher blending for better matches
+                            alpha = 0.2 if match_score > 0.7 else 0.1
+                            bead['template'] = cv2.addWeighted(
+                                template.astype(np.float32), 1 - alpha,
+                                new_template.astype(np.float32), alpha, 0
+                            ).astype(np.uint8)
+                    
+                    bead['lost_frames'] = 0
+                    bead['last_good_match'] = match_score
+                else:
+                    # Poor match - might be lost, keep last position
+                    new_x, new_y = last_x, last_y
+                    bead['lost_frames'] += 1
+                    bead['last_good_match'] = max(match_score, bead.get('last_good_match', 0.0) * 0.95)
             
-            # Store new position
+            # Store new position (always store, maintaining bead identity)
             bead['positions'].append((new_x, new_y))
             results.append((bead['id'], new_x, new_y))
         

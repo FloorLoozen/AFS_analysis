@@ -287,12 +287,14 @@ class XYTracesTab(QWidget):
         self.video_widget.set_tracking_enabled(True)
         self.video_widget.set_click_to_select_mode(True)
         
+        bead_positions = {}
         for x, y in self.detected_positions:
-            self.tracker.add_bead(current_frame, x, y, self.next_bead_id)
+            bead_id = self.next_bead_id
+            self.tracker.add_bead(current_frame, x, y, bead_id)
+            bead_positions[bead_id] = (x, y)
             self.next_bead_id += 1
         
-        # Update display
-        bead_positions = {i: pos for i, pos in enumerate(self.detected_positions)}
+        # Update display with correct bead IDs
         self.video_widget.update_bead_positions(bead_positions)
         
         # Update UI
@@ -442,6 +444,12 @@ class XYTracesTab(QWidget):
             if self.current_tracking_frame % 5 == 0:
                 bead_positions = {bid: (x, y) for bid, x, y in results}
                 self.video_widget.update_bead_positions(bead_positions)
+            
+            # Log beads with high lost frame counts
+            if self.current_tracking_frame % 50 == 0:
+                for bead in self.tracker.beads:
+                    if bead['lost_frames'] > 5:
+                        Logger.debug(f"Bead {bead['id']} lost for {bead['lost_frames']} frames (score: {bead.get('last_good_match', 0):.2f})", "XY_TAB")
         
         # Update status and save
         num_beads = len(self.tracker.beads)
