@@ -69,13 +69,32 @@ src/
 │   ├── analysis_widget.py  # Tab container
 │   └── tabs/
 │       ├── xy_traces_tab.py  # XY tracking UI
-│       └── [z_traces_tab.py]  # Placeholder for Z tracking
+│       ├── info_tab.py       # System information
+│       └── [z_traces_tab.py] # Placeholder for Z tracking
+├── analysis/               # Analysis modules (modular & extensible)
+│   ├── __init__.py         # Package exports
+│   ├── xy_tracking.py      # XY bead tracking (Cnossen algorithms)
+│   └── [future modules]    # z_tracking, force_analysis, etc.
 └── utils/
     ├── video_loader.py     # HDF5 video source
     ├── video_controller.py # Playback control
-    ├── analysis.py         # BeadTracker, auto-detection
-    └── tracking_io.py      # HDF5 save/load
+    ├── tracking_io.py      # HDF5 save/load for tracking data
+    ├── gpu_config.py       # GPU detection and configuration
+    ├── frame_processor.py  # GPU-accelerated frame operations
+    └── logger.py           # Logging utilities
 ```
+
+### Modular Analysis Design
+
+The `src/analysis/` package is organized for extensibility:
+- **`xy_tracking.py`**: XY-plane bead tracking (Center-of-Mass + Quadrant Interpolation)
+- **Future modules**:
+  - `z_tracking.py` - Z-axis position tracking
+  - `force_analysis.py` - Force curve analysis and processing
+  - `stiffness.py` - Spring constant and stiffness calculations
+  - `thermal.py` - Thermal calibration and noise analysis
+  
+Each analysis type has its own dedicated module for clarity and maintainability.
 
 ## Dependencies
 

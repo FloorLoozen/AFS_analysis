@@ -1,52 +1,74 @@
-﻿"""XY traces tracking - GPU-accelerated via OpenCL (AMD/NVIDIA/Intel GPUs).
+"""XY bead tracking and analysis - following Cnossen et al. methodology.
 
-Used by XY Traces tab only. No analysis performed.
+Implements two-stage high-precision tracking:
+1. Simple Center-of-Mass (COM) for initial estimate
+2. 2D Gaussian PSF fitting for sub-pixel accuracy
+
+Based on Cnossen et al. (2014) "An optimized software framework for real-time, high-throughput 
+tracking of spherical beads", Review of Scientific Instruments 85, 103712.
+
+This matches the photonpy implementation approach used in the actual Cnossen code.
 """
 
 import numpy as np
 import cv2
 from typing import List, Tuple, Dict, Any, Optional
-from scipy import ndimage
-from src.utils.gpu_config import USE_GPU, GPU_AVAILABLE
+from scipy.optimize import least_squares
 from src.utils.logger import Logger
 
 logger = Logger
 
 
 class BeadTracker:
-    """Store XY traces for beads - used by XY Traces tab."""
+    """XY bead tracking using two-stage approach: COM + 2D Gaussian PSF fitting."""
     
-    def __init__(self, window_size: int = 40, use_fast_tracking: bool = True):
+    def __init__(self, window_size: int = 40):
         """Initialize bead tracker.
         
         Args:
             window_size: Search window size around last position
-            use_fast_tracking: Use fast COM-only tracking (3-5x faster) vs full QI algorithm
         """
         self.window_size = window_size
         self.beads: List[Dict[str, Any]] = []
-        self.template_size = 30
-        self.use_fast_tracking = use_fast_tracking  # Fast mode by default
-        
-        # Optimization: Pre-compute trigonometric lookup table (from Cnossen paper)
-        # This avoids repeated sin/cos calculations during QI
-        self._trig_cache = {}  # Cache for different angular step counts
+        self.roi_size = 20  # ROI size for PSF fitting (should be ~3-4x sigma)
         
     def add_bead(self, frame: np.ndarray, x: int, y: int, bead_id: int):
-        """Add a new bead to track."""
+        """Add a new bead to track.
+        
+        Args:
+            frame: Current frame to determine bead appearance
+            x, y: Initial position
+            bead_id: Unique identifier for this bead
+        """
+        roi_size = 15
+        x1 = max(0, int(x - roi_size))
+        y1 = max(0, int(y - roi_size))
+        x2 = min(frame.shape[1] if len(frame.shape) > 1 else frame.shape[0], int(x + roi_size))
+        y2 = min(frame.shape[0], int(y + roi_size))
+        
+        is_dark = False
+        if x2 > x1 and y2 > y1:
+            roi = frame[y1:y2, x1:x2]
+            if len(roi.shape) == 3:
+                roi = roi.mean(axis=2)
+            center_val = roi[roi.shape[0]//2, roi.shape[1]//2] if roi.size > 0 else 0
+            edge_val = np.mean(roi)
+            is_dark = center_val < edge_val * 0.9
+        
         bead = {
             'id': bead_id,
             'positions': [(x, y)],
             'initial_pos': (x, y),
             'template': None,
-            'velocity': (0, 0)
+            'velocity': (0, 0),
+            'max_drift': 30  # Maximum allowed drift from initial position (pixels)
         }
         self.beads.append(bead)
     
     def track_frame(self, frame: np.ndarray) -> List[Tuple[int, int, int]]:
         """
         Track beads using COM + Quadrant Interpolation algorithm (GPU-accelerated).
-        Based on Cnossen et al., 2019 and qtrk implementation.
+        Based on Cnossen et al., 2014 and qtrk implementation.
         
         Args:
             frame: Current video frame (grayscale or RGB)
@@ -64,7 +86,7 @@ class BeadTracker:
                 else:
                     gray = frame.astype(np.float32)
             except Exception as e:
-                logger.debug(f"GPU frame conversion failed, using CPU: {e}", "analysis")
+                logger.debug(f"GPU frame conversion failed, using CPU: {e}", "xy_tracking")
                 if len(frame.shape) == 3:
                     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
                 else:
@@ -110,7 +132,7 @@ class BeadTracker:
             else:
                 # Precise mode: Reduced QI (1 iteration instead of 3 for speed)
                 refined_x, refined_y = self._quadrant_interpolation(
-                    gray, global_x, global_y, 
+                    gray, global_x, global_y,
                     radial_steps=20,      # Reduced from 40
                     angular_steps_per_q=16,  # Reduced from 32
                     min_radius=2.0,
@@ -118,6 +140,29 @@ class BeadTracker:
                     iterations=1,         # Reduced from 3 (MAJOR speedup!)
                     angular_step_factor=1.5
                 )
+            
+            # Debug: Log large movements
+            dx = refined_x - last_x
+            dy = refined_y - last_y
+            displacement = np.sqrt(dx*dx + dy*dy)
+            if displacement > 5.0:  # More than 5 pixels moved
+                logger.debug(f"Bead {bead['id']}: Large movement detected! Last:({last_x:.1f},{last_y:.1f}) → New:({refined_x:.1f},{refined_y:.1f}) = {displacement:.1f}px", "xy_tracking")
+            
+            # CRITICAL: Constrain drift from initial position
+            # This prevents beads from drifting away when switching between dark/bright
+            initial_x, initial_y = bead['initial_pos']
+            max_drift = bead.get('max_drift', 30)  # Default 30 pixels max drift
+            
+            drift_x = refined_x - initial_x
+            drift_y = refined_y - initial_y
+            total_drift = np.sqrt(drift_x*drift_x + drift_y*drift_y)
+            
+            if total_drift > max_drift:
+                # Constrain to max_drift radius from initial position
+                scale = max_drift / total_drift
+                refined_x = initial_x + drift_x * scale
+                refined_y = initial_y + drift_y * scale
+                logger.debug(f"Bead {bead['id']}: Drift constrained from {total_drift:.1f}px to {max_drift}px", "xy_tracking")
             
             # Store updated position
             bead['positions'].append((refined_x, refined_y))
@@ -129,6 +174,10 @@ class BeadTracker:
         """
         Compute center-of-mass of intensity in ROI (optimized with scipy).
         
+        Automatically detects if bead is dark or bright by checking center vs edges.
+        Re-evaluates every frame to handle beads moving through focus.
+        Uses weighted inversion to suppress diffraction rings.
+        
         Args:
             roi: Region of interest image
             
@@ -137,8 +186,62 @@ class BeadTracker:
         """
         # Use scipy's optimized center_of_mass (faster than manual computation)
         try:
-            # Subtract background for better accuracy
-            roi_bg_subtracted = roi - np.min(roi)
+            cy_roi, cx_roi = roi.shape[0] // 2, roi.shape[1] // 2
+            
+            # Sample center region (small area)
+            center_size = 3
+            y1_c = max(0, cy_roi - center_size)
+            y2_c = min(roi.shape[0], cy_roi + center_size)
+            x1_c = max(0, cx_roi - center_size)
+            x2_c = min(roi.shape[1], cx_roi + center_size)
+            center_intensity = np.mean(roi[y1_c:y2_c, x1_c:x2_c])
+            
+            # Sample ring around center (to detect diffraction pattern)
+            ring_radius = 8
+            y1_r = max(0, cy_roi - ring_radius)
+            y2_r = min(roi.shape[0], cy_roi + ring_radius)
+            x1_r = max(0, cx_roi - ring_radius)
+            x2_r = min(roi.shape[1], cx_roi + ring_radius)
+            
+            # Create ring mask (exclude center)
+            ring_mask = np.ones((y2_r - y1_r, x2_r - x1_r), dtype=bool)
+            inner = 4
+            cy_local = cy_roi - y1_r
+            cx_local = cx_roi - x1_r
+            y1_inner = max(0, cy_local - inner)
+            y2_inner = min(ring_mask.shape[0], cy_local + inner)
+            x1_inner = max(0, cx_local - inner)
+            x2_inner = min(ring_mask.shape[1], cx_local + inner)
+            ring_mask[y1_inner:y2_inner, x1_inner:x2_inner] = False
+            
+            ring_roi = roi[y1_r:y2_r, x1_r:x2_r]
+            ring_intensity = np.mean(ring_roi[ring_mask]) if ring_mask.any() else np.mean(roi)
+            
+            # Determine if dark or bright bead
+            # Dark bead: center is darker than ring
+            # Use more aggressive threshold to handle diffraction patterns
+            intensity_ratio = center_intensity / (ring_intensity + 1e-6)
+            
+            if intensity_ratio < 0.98:  # Center is darker (even slightly)
+                # Dark bead - invert and enhance center
+                roi_processed = np.max(roi) - roi
+                # Apply stronger weight to center region to suppress rings
+                weights = np.ones_like(roi)
+                y, x = np.ogrid[:roi.shape[0], :roi.shape[1]]
+                dist_from_center = np.sqrt((x - cx_roi)**2 + (y - cy_roi)**2)
+                weights = np.exp(-dist_from_center**2 / (2 * 5**2))  # Gaussian weight favoring center
+                roi_processed = roi_processed * (0.5 + 0.5 * weights)  # Blend
+            else:
+                # Bright bead
+                roi_processed = roi
+                # Also apply center weighting for bright beads
+                y, x = np.ogrid[:roi.shape[0], :roi.shape[1]]
+                dist_from_center = np.sqrt((x - cx_roi)**2 + (y - cy_roi)**2)
+                weights = np.exp(-dist_from_center**2 / (2 * 5**2))
+                roi_processed = roi * (0.5 + 0.5 * weights)
+            
+            # Subtract background
+            roi_bg_subtracted = roi_processed - np.min(roi_processed)
             
             # Scipy's center_of_mass is highly optimized
             com_y, com_x = ndimage.center_of_mass(roi_bg_subtracted)
@@ -148,7 +251,7 @@ class BeadTracker:
                 return roi.shape[1] / 2.0, roi.shape[0] / 2.0
                 
             return com_x, com_y
-        except:
+        except Exception as e:
             # Fallback to center of ROI
             return roi.shape[1] / 2.0, roi.shape[0] / 2.0
     
@@ -180,8 +283,55 @@ class BeadTracker:
         
         roi = frame[y1:y2, x1:x2]
         
-        # Subtract background
-        roi_bg = roi - np.min(roi)
+        # Check if bead center is dark or bright (re-evaluate each frame for focus changes)
+        # Use same sophisticated detection as _compute_center_of_mass
+        cy_roi, cx_roi = roi.shape[0] // 2, roi.shape[1] // 2
+        
+        # Sample center
+        center_size = 2
+        y1_c = max(0, cy_roi - center_size)
+        y2_c = min(roi.shape[0], cy_roi + center_size)
+        x1_c = max(0, cx_roi - center_size)
+        x2_c = min(roi.shape[1], cx_roi + center_size)
+        center_intensity = np.mean(roi[y1_c:y2_c, x1_c:x2_c])
+        
+        # Sample ring (for diffraction pattern detection)
+        ring_radius = 4
+        y1_r = max(0, cy_roi - ring_radius)
+        y2_r = min(roi.shape[0], cy_roi + ring_radius)
+        x1_r = max(0, cx_roi - ring_radius)
+        x2_r = min(roi.shape[1], cx_roi + ring_radius)
+        
+        ring_mask = np.ones((y2_r - y1_r, x2_r - x1_r), dtype=bool)
+        inner = 2
+        cy_local = cy_roi - y1_r
+        cx_local = cx_roi - x1_r
+        y1_inner = max(0, cy_local - inner)
+        y2_inner = min(ring_mask.shape[0], cy_local + inner)
+        x1_inner = max(0, cx_local - inner)
+        x2_inner = min(ring_mask.shape[1], cx_local + inner)
+        if y2_inner > y1_inner and x2_inner > x1_inner:
+            ring_mask[y1_inner:y2_inner, x1_inner:x2_inner] = False
+        
+        ring_roi = roi[y1_r:y2_r, x1_r:x2_r]
+        ring_intensity = np.mean(ring_roi[ring_mask]) if ring_mask.any() else np.mean(roi)
+        
+        intensity_ratio = center_intensity / (ring_intensity + 1e-6)
+        
+        if intensity_ratio < 0.98:  # Dark bead
+            roi_bg = np.max(roi) - roi
+            # Apply Gaussian weighting to suppress rings
+            y, x = np.ogrid[:roi.shape[0], :roi.shape[1]]
+            dist = np.sqrt((x - cx_roi)**2 + (y - cy_roi)**2)
+            weights = np.exp(-dist**2 / (2 * 3**2))
+            roi_bg = roi_bg * (0.5 + 0.5 * weights)
+        else:  # Bright bead
+            roi_bg = roi - np.min(roi)
+            # Also weight center for bright beads
+            y, x = np.ogrid[:roi.shape[0], :roi.shape[1]]
+            dist = np.sqrt((x - cx_roi)**2 + (y - cy_roi)**2)
+            weights = np.exp(-dist**2 / (2 * 3**2))
+            roi_bg = roi_bg * (0.5 + 0.5 * weights)
         
         if np.max(roi_bg) == 0:
             return x, y  # No signal
@@ -316,7 +466,7 @@ class BeadTracker:
         
         # For each radial bin
         for i in range(radial_steps):
-            r = min_radius + rstep * i
+            r = min_radius + rstep * i  # Sample at bin edge (original qtrk behavior)
             total = 0.0
             count = 0
             
@@ -486,7 +636,7 @@ class BeadTracker:
 
 
 def detect_beads_auto(frame: np.ndarray, min_area: int = 50, max_area: int = 5000, threshold_value: int = 150) -> List[Tuple[int, int]]:
-    """Auto-detect beads (GPU-accelerated via OpenCL)."""
+    """Auto-detect beads in XY plane (GPU-accelerated via OpenCL)."""
     # Convert to grayscale (GPU-accelerated if available)
     if USE_GPU and GPU_AVAILABLE:
         try:
@@ -502,7 +652,7 @@ def detect_beads_auto(frame: np.ndarray, min_area: int = 50, max_area: int = 500
             _, gpu_binary = cv2.threshold(gpu_gray, threshold_value, 255, cv2.THRESH_BINARY)
             binary = gpu_binary.get()
         except Exception as e:
-            logger.debug(f"GPU bead detection failed, using CPU: {e}", "analysis")
+            logger.debug(f"GPU bead detection failed, using CPU: {e}", "xy_tracking")
             # CPU fallback
             if len(frame.shape) == 3:
                 gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)

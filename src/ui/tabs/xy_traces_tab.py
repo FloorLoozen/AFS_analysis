@@ -8,7 +8,7 @@ from PyQt5.QtCore import Qt, QTimer
 import numpy as np
 from pathlib import Path
 
-from src.utils.analysis import BeadTracker, detect_beads_auto
+from src.analysis.xy_tracking_xcorr import BeadTracker, detect_beads_auto
 from src.utils.tracking_io import TrackingDataIO
 from src.utils.logger import Logger
 
