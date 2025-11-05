@@ -1,4 +1,4 @@
-"""Info tab for displaying measurement metadata."""
+"""Info tab for displaying measurement metadata and GPU information."""
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QGroupBox, QFormLayout, QScrollArea
@@ -6,6 +6,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt
 from datetime import datetime
 import os
+from src.utils.gpu_config import get_gpu_info
 
 
 class InfoTab(QWidget):
@@ -40,6 +41,18 @@ class InfoTab(QWidget):
         layout = QVBoxLayout(scroll_widget)
         layout.setContentsMargins(8, 24, 8, 8)
         layout.setSpacing(10)
+        
+        # GPU/System Info Section (always visible)
+        system_group = QGroupBox("System Info")
+        self.system_layout = QFormLayout(system_group)
+        self.system_layout.setContentsMargins(8, 8, 8, 8)
+        self.system_layout.setSpacing(5)
+        self.system_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        self.system_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        layout.addWidget(system_group)
+        
+        # Populate GPU info immediately
+        self._populate_system_info()
         
         # Measurement Info Section
         measurement_group = QGroupBox("Measurement Info")
@@ -108,6 +121,31 @@ class InfoTab(QWidget):
             item = layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+    
+    def _populate_system_info(self):
+        """Populate system and GPU information (called once during init)."""
+        self._clear_layout(self.system_layout)
+        
+        # Get GPU information
+        gpu_info = get_gpu_info()
+        
+        # GPU Acceleration Status - simple text without special styling
+        if gpu_info['opencl_enabled']:
+            status_text = "Enabled"
+        elif gpu_info['opencl_available']:
+            status_text = "Available but not enabled"
+        else:
+            status_text = "Not Available (CPU only)"
+        
+        self._add_info_row(self.system_layout, "GPU Acceleration:", status_text)
+        
+        # GPU Device Name
+        if gpu_info['device_name'] != 'CPU':
+            self._add_info_row(self.system_layout, "GPU Device:", gpu_info['device_name'])
+        
+        # Acceleration Type
+        if gpu_info['acceleration'] != 'None':
+            self._add_info_row(self.system_layout, "Acceleration Type:", gpu_info['acceleration'])
     
     def on_video_loaded(self):
         """Called when a new video is loaded."""

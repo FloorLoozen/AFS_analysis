@@ -26,82 +26,88 @@ class TrackingDataIO:
             Logger.debug("No bead data to save", "TRACKING_IO")
             return
         
+        f = None
+        should_close = False
+        
         try:
             Logger.debug(f"Saving to HDF5: {hdf5_path}", "TRACKING_IO")
             
-            # Use provided file handle or open new one
-            if hdf5_file_handle is not None:
-                f = hdf5_file_handle
-                should_close = False
-            else:
-                f = h5py.File(hdf5_path, 'a')
-                should_close = True
+            # Always open our own file handle for writing
+            # Don't reuse read-only handles from video loader
+            f = h5py.File(hdf5_path, 'a')
+            should_close = True
             
-            try:
-                # Create analysed_data group if it doesn't exist
-                if 'analysed_data' not in f:
-                    analysis_group = f.create_group('analysed_data')
-                else:
-                    analysis_group = f['analysed_data']  # type: ignore
+            # Create analysed_data group if it doesn't exist
+            if 'analysed_data' not in f:
+                analysis_group = f.create_group('analysed_data')
+            else:
+                analysis_group = f['analysed_data']  # type: ignore
+            
+            # Create or overwrite xy_tracking group
+            if 'xy_tracking' in analysis_group:  # type: ignore
+                del analysis_group['xy_tracking']  # type: ignore
+            
+            xy_group = analysis_group.create_group('xy_tracking')  # type: ignore
+            
+            # Prepare tracking data
+            max_frames = max(len(bead['positions']) for bead in beads_data)
+            num_beads = len(beads_data)
+            
+            # Create dataset: shape (num_frames, num_beads, 2) for (x, y) positions
+            tracking_data = np.full((max_frames, num_beads, 2), -1, dtype=np.int32)
+            
+            for bead_idx, bead in enumerate(beads_data):
+                positions = bead['positions']
+                for frame_idx, (x, y) in enumerate(positions):
+                    tracking_data[frame_idx, bead_idx, 0] = x
+                    tracking_data[frame_idx, bead_idx, 1] = y
+            
+            # Save positions dataset
+            positions_dataset = xy_group.create_dataset('positions', data=tracking_data)
+            
+            # Save metadata as group attributes
+            xy_group.attrs['num_beads'] = num_beads
+            xy_group.attrs['num_frames'] = max_frames
+            xy_group.attrs['description'] = 'XY bead tracking data'
+            
+            if metadata:
+                for key, value in metadata.items():
+                    if value is not None:
+                        xy_group.attrs[key] = value
+            
+            # Save individual bead metadata
+            for bead_idx, bead in enumerate(beads_data):
+                bead_id = bead['id']
+                initial_x, initial_y = bead['positions'][0] if bead['positions'] else (0, 0)
                 
-                # Create or overwrite xy_tracking group
-                if 'xy_tracking' in analysis_group:  # type: ignore
-                    del analysis_group['xy_tracking']  # type: ignore
+                xy_group.attrs[f'bead_{bead_idx}_id'] = bead_id
+                xy_group.attrs[f'bead_{bead_idx}_initial_x'] = initial_x
+                xy_group.attrs[f'bead_{bead_idx}_initial_y'] = initial_y
                 
-                xy_group = analysis_group.create_group('xy_tracking')  # type: ignore
-                
-                # Prepare tracking data
-                max_frames = max(len(bead['positions']) for bead in beads_data)
-                num_beads = len(beads_data)
-                
-                # Create dataset: shape (num_frames, num_beads, 2) for (x, y) positions
-                tracking_data = np.full((max_frames, num_beads, 2), -1, dtype=np.int32)
-                
-                for bead_idx, bead in enumerate(beads_data):
-                    positions = bead['positions']
-                    for frame_idx, (x, y) in enumerate(positions):
-                        tracking_data[frame_idx, bead_idx, 0] = x
-                        tracking_data[frame_idx, bead_idx, 1] = y
-                
-                # Save positions dataset
-                positions_dataset = xy_group.create_dataset('positions', data=tracking_data)
-                
-                # Save metadata as group attributes
-                xy_group.attrs['num_beads'] = num_beads
-                xy_group.attrs['num_frames'] = max_frames
-                xy_group.attrs['description'] = 'XY bead tracking data'
-                
-                if metadata:
-                    for key, value in metadata.items():
-                        if value is not None:
-                            xy_group.attrs[key] = value
-                
-                # Save individual bead metadata
-                for bead_idx, bead in enumerate(beads_data):
-                    bead_id = bead['id']
-                    initial_x, initial_y = bead['positions'][0] if bead['positions'] else (0, 0)
-                    
-                    xy_group.attrs[f'bead_{bead_idx}_id'] = bead_id
-                    xy_group.attrs[f'bead_{bead_idx}_initial_x'] = initial_x
-                    xy_group.attrs[f'bead_{bead_idx}_initial_y'] = initial_y
-                    
-                    # Save template if available
-                    if 'template' in bead and bead['template'] is not None:
-                        template_name = f'bead_{bead_idx}_template'
-                        xy_group.create_dataset(template_name, data=bead['template'])
-                
-                Logger.success(f"Saved {num_beads} beads, {max_frames} frames to /analysed_data/xy_tracking/", "TRACKING_IO")
-                
-            finally:
-                # Only close if we opened it ourselves
-                if should_close:
-                    f.close()
+                # Save template if available
+                if 'template' in bead and bead['template'] is not None:
+                    template_name = f'bead_{bead_idx}_template'
+                    xy_group.create_dataset(template_name, data=bead['template'])
+            
+            # Flush to ensure data is written
+            if should_close:
+                f.flush()
+            
+            Logger.success(f"Saved {num_beads} beads, {max_frames} frames to /analysed_data/xy_tracking/", "TRACKING_IO")
                 
         except Exception as e:
             Logger.error(f"Error saving tracking data: {e}", "TRACKING_IO")
             import traceback
             traceback.print_exc()
             raise
+        finally:
+            # Always close if we opened it ourselves
+            if should_close and f is not None:
+                try:
+                    f.close()
+                    Logger.debug("HDF5 file closed after save", "TRACKING_IO")
+                except Exception as e:
+                    Logger.error(f"Error closing HDF5 file: {e}", "TRACKING_IO")
     
     @staticmethod
     def load_from_hdf5(hdf5_path: str) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:

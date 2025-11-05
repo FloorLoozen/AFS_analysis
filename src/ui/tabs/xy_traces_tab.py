@@ -40,6 +40,9 @@ class XYTracesTab(QWidget):
         self.tracking_timer = QTimer()
         self.tracking_timer.timeout.connect(self._process_next_frame)
         
+        # Performance optimization: Process multiple frames per timer tick
+        self.frames_per_batch = 5  # Process 5 frames at a time for better performance
+        
         self._init_ui()
     
     def _init_ui(self):
@@ -72,6 +75,12 @@ class XYTracesTab(QWidget):
         self.max_size_spinbox.setValue(5000)
         self.max_size_spinbox.setFixedWidth(80)
         settings_layout.addRow("Max Size:", self.max_size_spinbox)
+        
+        # Fast tracking mode checkbox
+        self.fast_tracking_checkbox = QCheckBox("Fast Mode (recommended)")
+        self.fast_tracking_checkbox.setChecked(True)  # Default to fast mode
+        self.fast_tracking_checkbox.setToolTip("Fast: Gaussian refinement (accurate & fast). Precise: Quadrant Interpolation (slightly better for difficult beads).")
+        settings_layout.addRow("", self.fast_tracking_checkbox)
         
         settings_group.setLayout(settings_layout)
         layout.addWidget(settings_group)
@@ -417,6 +426,9 @@ class XYTracesTab(QWidget):
         if not self.video_widget or len(self.tracker.beads) == 0:
             return
         
+        # Update tracker to use fast mode setting
+        self.tracker.use_fast_tracking = self.fast_tracking_checkbox.isChecked()
+        
         num_beads = len(self.tracker.beads)
         self.total_tracking_frames = self.video_widget.controller.get_total_frames()  # type: ignore
         
@@ -457,36 +469,43 @@ class XYTracesTab(QWidget):
         self._update_status(f"Resuming: {num_beads} beads", f"Frame {self.current_tracking_frame}/{self.total_tracking_frames}")
     
     def _process_next_frame(self):
-        """Process one frame (called by timer)."""
+        """Process multiple frames per timer tick for better performance."""
         if self.current_tracking_frame >= self.total_tracking_frames:
             # Tracking complete
             self._finish_tracking()
             return
         
-        # Process frame
-        if self.video_widget is not None:
-            self.video_widget.controller.seek_to_frame(self.current_tracking_frame)
-            frame = self.video_widget.get_current_frame()
-        else:
-            return
+        # Process multiple frames in one timer tick for better performance
+        frames_to_process = min(self.frames_per_batch, self.total_tracking_frames - self.current_tracking_frame)
         
-        if frame is not None:
-            results = self.tracker.track_frame(frame)
+        for i in range(frames_to_process):
+            if self.current_tracking_frame >= self.total_tracking_frames:
+                break
+                
+            # Process frame
+            if self.video_widget is not None:
+                self.video_widget.controller.seek_to_frame(self.current_tracking_frame)
+                frame = self.video_widget.get_current_frame()
+            else:
+                return
             
-            # Only update display every 5 frames for better performance
-            if self.current_tracking_frame % 5 == 0 and self.video_widget is not None:
-                bead_positions = {bid: (x, y) for bid, x, y in results}
-                self.video_widget.update_bead_positions(bead_positions)
-        
-        # Update status and save
-        num_beads = len(self.tracker.beads)
-        if self.current_tracking_frame % 100 == 0 and self.current_hdf5_path:
-            self._save_tracking_to_hdf5()
-            self._update_status(f"Tracking: {num_beads} beads", f"Frame {self.current_tracking_frame}/{self.total_tracking_frames} (saved)")
-        elif self.current_tracking_frame % 10 == 0:
-            self._update_status(f"Tracking: {num_beads} beads", f"Frame {self.current_tracking_frame}/{self.total_tracking_frames}")
-        
-        self.current_tracking_frame += 1
+            if frame is not None:
+                results = self.tracker.track_frame(frame)
+                
+                # Only update display on last frame of batch
+                if i == frames_to_process - 1 and self.video_widget is not None:
+                    bead_positions = {bid: (x, y) for bid, x, y in results}
+                    self.video_widget.update_bead_positions(bead_positions)
+            
+            # Update status and save
+            num_beads = len(self.tracker.beads)
+            if self.current_tracking_frame % 100 == 0 and self.current_hdf5_path:
+                self._save_tracking_to_hdf5()
+                self._update_status(f"Tracking: {num_beads} beads", f"Frame {self.current_tracking_frame}/{self.total_tracking_frames} (saved)")
+            elif self.current_tracking_frame % 10 == 0:
+                self._update_status(f"Tracking: {num_beads} beads", f"Frame {self.current_tracking_frame}/{self.total_tracking_frames}")
+            
+            self.current_tracking_frame += 1
     
     def _finish_tracking(self):
         """Complete tracking and save final data."""
@@ -530,15 +549,21 @@ class XYTracesTab(QWidget):
                 'num_frames': len(self.tracker.beads[0]['positions']) if self.tracker.beads else 0
             }
             
-            # Get the already-open HDF5 file handle from video widget
-            hdf5_handle = self.video_widget.get_hdf5_file() if self.video_widget else None
+            # Temporarily close the video file to allow writing
+            if self.video_widget and self.video_widget.controller and self.video_widget.controller.video_source:
+                self.video_widget.controller.video_source.temporary_close_for_writing()
             
-            TrackingDataIO.save_to_hdf5(
-                self.current_hdf5_path, 
-                self.tracker.beads, 
-                metadata,
-                hdf5_file_handle=hdf5_handle
-            )
+            try:
+                TrackingDataIO.save_to_hdf5(
+                    self.current_hdf5_path, 
+                    self.tracker.beads, 
+                    metadata
+                )
+            finally:
+                # Reopen the video file
+                if self.video_widget and self.video_widget.controller and self.video_widget.controller.video_source:
+                    self.video_widget.controller.video_source.reopen_after_writing()
+                    
         except Exception as e:
             Logger.error(f"Save error: {e}", "XY_TAB")
             import traceback

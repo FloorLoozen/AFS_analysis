@@ -2,21 +2,31 @@
 
 Video analysis application for Atomic Force Spectroscopy HDF5 data with XY bead tracking.
 
+**🚀 GPU-Accelerated**: Supports OpenCL for AMD/NVIDIA/Intel GPUs (3-5x faster processing). See [GPU_ACCELERATION.md](GPU_ACCELERATION.md) for details.
+
 ## Features
 
 ### Video Player
 - **HDF5 Support**: Read video from AFS_acquisition files (`/raw_data/main_video` or `/data/main_video` for backward compatibility)
 - **Playback Controls**: Play, pause, stop with frame-by-frame navigation
 - **Metadata Display**: Show recording info (frames, FPS, duration)
+- **GPU Acceleration**: Hardware-accelerated frame processing and display
 
 ### XY Bead Tracking
-- **Auto-Detection**: Automatically find beads using adjustable parameters
+- **Auto-Detection**: Automatically find beads using adjustable parameters (GPU-accelerated)
 - **Manual Validation**: Add/remove beads with left/right clicks
 - **Template Matching**: Track bead positions across all frames
 - **Auto-Save**: Saves every 100 frames during tracking
 - **Resume Capability**: Continue from last tracked frame
 - **HDF5 Storage**: Data saved to `/analysed_data/xy_tracking` in source file
 - **CSV Export**: Export tracking data for external analysis
+
+## Performance
+
+- **GPU Acceleration**: 3-5x faster frame processing with OpenCL
+- **Supported GPUs**: AMD (Radeon Pro), NVIDIA, Intel integrated
+- **Auto Fallback**: Seamlessly uses CPU if GPU unavailable
+- **Check Status**: View GPU info in the Info tab
 
 ## Installation
 

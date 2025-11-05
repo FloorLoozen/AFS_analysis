@@ -1,10 +1,17 @@
-"""Video loading and management logic - HDF5 only."""
+"""Video loading and management logic - HDF5 only (GPU-accelerated).
+
+Supports OpenCL GPU acceleration for frame processing.
+"""
 
 import h5py
 import numpy as np
 import cv2
 from pathlib import Path
 from typing import Optional, Dict, Any
+from src.utils.gpu_config import USE_GPU, GPU_AVAILABLE
+from src.utils.logger import Logger
+
+logger = Logger
 
 
 class HDF5VideoSource:
@@ -19,11 +26,36 @@ class HDF5VideoSource:
         self.metadata = {}
         self._load(file_path)
     
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - ensure cleanup."""
+        self.cleanup()
+        return False
+    
+    def __del__(self):
+        """Destructor - ensure cleanup on garbage collection."""
+        self.cleanup()
+    
     def _load(self, file_path: str):
         """Load HDF5 video file."""
         try:
-            # Open in read-write mode to allow saving tracking data later
-            self.hdf5_file = h5py.File(file_path, 'r+')
+            # Try opening in read-only mode first (safer)
+            try:
+                self.hdf5_file = h5py.File(file_path, 'r')
+                logger.info(f"HDF5 file opened in read-only mode: {file_path}")
+            except (OSError, IOError) as e:
+                # If file is locked, try to provide helpful error message
+                if "already open" in str(e).lower():
+                    logger.error(f"File is locked by another process: {file_path}")
+                    raise RuntimeError(
+                        f"Cannot open file - it's already open in another program.\n"
+                        f"Please close the file and try again.\n"
+                        f"File: {file_path}"
+                    ) from e
+                raise
             
             # Try to find video data in common locations
             video_paths = ['raw_data/main_video', 'data/main_video', 'main_video', 'video']
@@ -62,31 +94,74 @@ class HDF5VideoSource:
             raise RuntimeError(f"Failed to load HDF5 video: {e}")
     
     def get_frame(self, frame_index: int) -> Optional[np.ndarray]:
-        """Get frame at specified index."""
+        """Get frame at specified index (GPU-accelerated color conversion)."""
         if self.video_data is None or not (0 <= frame_index < self.total_frames):
             return None
         
         try:
             frame = self.video_data[frame_index]
             
-            # Convert BGR to RGB if needed
+            # Convert BGR to RGB if needed (GPU-accelerated)
             if 'color_format' in self.metadata and self.metadata['color_format'] == 'BGR':
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                if USE_GPU and GPU_AVAILABLE:
+                    try:
+                        gpu_frame = cv2.UMat(frame)
+                        gpu_rgb = cv2.cvtColor(gpu_frame, cv2.COLOR_BGR2RGB)
+                        frame = gpu_rgb.get()
+                    except Exception as e:
+                        logger.debug(f"GPU color conversion failed, using CPU: {e}")
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                else:
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
             return frame
         except Exception as e:
-            print(f"Error reading frame {frame_index}: {e}")
+            logger.error(f"Error reading frame {frame_index}: {e}")
             return None
     
     def cleanup(self):
-        """Clean up resources."""
+        """Clean up resources - closes HDF5 file properly."""
+        if self.hdf5_file:
+            try:
+                self.hdf5_file.flush()  # Ensure all changes are written
+                self.hdf5_file.close()
+                logger.info(f"HDF5 file closed: {self.file_path}", "video_loader")
+            except Exception as e:
+                logger.error(f"Error closing HDF5 file: {e}", "video_loader")
+            finally:
+                self.hdf5_file = None
+        self.video_data = None
+    
+    def temporary_close_for_writing(self):
+        """
+        Temporarily close the file to allow another process to write to it.
+        Call reopen_after_writing() to resume reading.
+        """
         if self.hdf5_file:
             try:
                 self.hdf5_file.close()
-            except:
-                pass
-            self.hdf5_file = None
-        self.video_data = None
+                logger.debug(f"Temporarily closed HDF5 file for writing", "video_loader")
+            except Exception as e:
+                logger.error(f"Error temporarily closing HDF5 file: {e}", "video_loader")
+    
+    def reopen_after_writing(self):
+        """
+        Reopen the file after it was temporarily closed for writing.
+        """
+        if not self.hdf5_file:
+            try:
+                self.hdf5_file = h5py.File(self.file_path, 'r')
+                
+                # Re-find video data
+                video_paths = ['raw_data/main_video', 'data/main_video', 'main_video', 'video']
+                for path in video_paths:
+                    if path in self.hdf5_file:
+                        self.video_data = self.hdf5_file[path]
+                        break
+                
+                logger.debug(f"Reopened HDF5 file after writing", "video_loader")
+            except Exception as e:
+                logger.error(f"Error reopening HDF5 file: {e}", "video_loader")
     
     def get_metadata(self) -> Dict[str, Any]:
         """Get video metadata including file info, video properties, and HDF5 attributes."""

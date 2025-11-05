@@ -1,8 +1,15 @@
-"""Frame processing utilities - separate from UI display logic."""
+"""Frame processing utilities - separate from UI display logic.
+
+GPU-accelerated via OpenCL for AMD/NVIDIA/Intel GPUs.
+"""
 
 import cv2
 import numpy as np
 from typing import Tuple, Dict, Optional
+from src.utils.gpu_config import USE_GPU, GPU_AVAILABLE
+from src.utils.logger import Logger
+
+logger = Logger
 
 
 class FrameProcessor:
@@ -12,7 +19,7 @@ class FrameProcessor:
     def resize_to_fit(frame: np.ndarray, target_width: int, target_height: int, 
                       keep_aspect_ratio: bool = True) -> Tuple[np.ndarray, float]:
         """
-        Resize frame to fit within target dimensions.
+        Resize frame to fit within target dimensions (GPU-accelerated).
         
         Args:
             frame: Input frame (RGB or BGR)
@@ -36,7 +43,27 @@ class FrameProcessor:
             new_w, new_h = target_width, target_height
             scale = min(target_width / w, target_height / h)
         
-        # Resize frame using fast interpolation
+        # GPU-accelerated resize using OpenCL (works with AMD/NVIDIA/Intel GPUs)
+        if USE_GPU and GPU_AVAILABLE:
+            try:
+                # Use UMat for OpenCL GPU acceleration
+                gpu_frame = cv2.UMat(frame)
+                
+                # Select interpolation method based on scale
+                if scale < 1.0:
+                    # Downsampling - use AREA for better quality
+                    gpu_resized = cv2.resize(gpu_frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+                else:
+                    # Upsampling - use LINEAR for speed
+                    gpu_resized = cv2.resize(gpu_frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+                
+                resized = gpu_resized.get()  # Download from GPU
+                return resized, scale
+            except Exception as e:
+                # Fall back to CPU if GPU fails
+                logger.debug(f"GPU resize failed, using CPU: {e}", "frame_processor")
+        
+        # CPU fallback path
         if scale < 1.0:
             # Downsampling - use AREA for better quality
             resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
@@ -154,15 +181,26 @@ class FrameProcessor:
     
     @staticmethod
     def convert_to_grayscale(frame: np.ndarray) -> np.ndarray:
-        """Convert frame to grayscale."""
+        """Convert frame to grayscale (GPU-accelerated)."""
         if len(frame.shape) == 2:
             return frame  # Already grayscale
+        
+        # GPU-accelerated color conversion
+        if USE_GPU and GPU_AVAILABLE:
+            try:
+                gpu_frame = cv2.UMat(frame)
+                gpu_gray = cv2.cvtColor(gpu_frame, cv2.COLOR_RGB2GRAY)
+                return gpu_gray.get()
+            except Exception as e:
+                logger.debug(f"GPU grayscale conversion failed, using CPU: {e}", "frame_processor")
+        
+        # CPU fallback
         return cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
     
     @staticmethod
     def apply_contrast(frame: np.ndarray, alpha: float = 1.0, beta: int = 0) -> np.ndarray:
         """
-        Adjust frame contrast and brightness.
+        Adjust frame contrast and brightness (GPU-accelerated).
         
         Args:
             frame: Input frame
@@ -172,6 +210,16 @@ class FrameProcessor:
         Returns:
             Adjusted frame
         """
+        # GPU-accelerated contrast/brightness adjustment
+        if USE_GPU and GPU_AVAILABLE:
+            try:
+                gpu_frame = cv2.UMat(frame)
+                gpu_result = cv2.convertScaleAbs(gpu_frame, alpha=alpha, beta=beta)
+                return gpu_result.get()
+            except Exception as e:
+                logger.debug(f"GPU contrast adjustment failed, using CPU: {e}", "frame_processor")
+        
+        # CPU fallback
         return cv2.convertScaleAbs(frame, alpha=alpha, beta=beta)
     
     @staticmethod

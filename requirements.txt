@@ -3,3 +3,7 @@ PyQt5>=5.15.0
 numpy>=1.21.0
 opencv-python>=4.5.0
 h5py>=3.0.0
+
+# Performance optimization libraries
+numba>=0.57.0  # JIT compilation for CPU speedup
+scipy>=1.9.0   # Optimized scientific computing (FFT, interpolation)
