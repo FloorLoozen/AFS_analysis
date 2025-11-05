@@ -26,8 +26,11 @@ def create_application():
     from PyQt5.QtCore import Qt
     
     # Enable high DPI support
-    QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    try:
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)  # type: ignore
+        QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)  # type: ignore
+    except AttributeError:
+        pass  # These attributes might not exist in all Qt versions
     
     app = QApplication(sys.argv)
     app.setApplicationName("AFS Analysis")

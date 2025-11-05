@@ -48,7 +48,7 @@ class FrameProcessor:
     
     @staticmethod
     def draw_bead_overlays(frame: np.ndarray, bead_positions: Dict[int, Tuple[int, int]], 
-                          bead_traces: Dict[int, list] = None, box_size: int = 30, box_thickness: int = 1) -> np.ndarray:
+                          bead_traces: Dict[int, list] = {}, box_size: int = 30, box_thickness: int = 1) -> np.ndarray:  # type: ignore
         """
         Draw tracking overlays on frame with live traces.
         

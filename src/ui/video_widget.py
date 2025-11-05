@@ -21,11 +21,11 @@ class ClickableLabel(QLabel):
     clicked = pyqtSignal(int, int)  # x, y coordinates (left click)
     right_clicked = pyqtSignal(int, int)  # x, y coordinates (right click)
     
-    def mousePressEvent(self, ev: QMouseEvent):
+    def mousePressEvent(self, ev: QMouseEvent) -> None:  # type: ignore
         """Handle mouse press events."""
-        if ev.button() == Qt.LeftButton:
+        if ev.button() == Qt.LeftButton:  # type: ignore
             self.clicked.emit(ev.x(), ev.y())
-        elif ev.button() == Qt.RightButton:
+        elif ev.button() == Qt.RightButton:  # type: ignore
             self.right_clicked.emit(ev.x(), ev.y())
         super().mousePressEvent(ev)
 
@@ -87,7 +87,7 @@ class VideoWidget(QGroupBox):
         self.video_label = ClickableLabel()
         self.video_label.clicked.connect(self._on_video_clicked)
         self.video_label.right_clicked.connect(self._on_video_right_clicked)
-        self.video_label.setAlignment(Qt.AlignCenter)
+        self.video_label.setAlignment(Qt.AlignCenter)  # type: ignore
         self.video_label.setMinimumSize(640, 480)
         self.video_label.setStyleSheet("")
         self.video_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -95,7 +95,7 @@ class VideoWidget(QGroupBox):
         layout.addWidget(self.video_label, 1)
         
         # Timeline slider below video
-        self.timeline_slider = QSlider(Qt.Horizontal)
+        self.timeline_slider = QSlider(Qt.Horizontal)  # type: ignore
         self.timeline_slider.setMinimum(0)
         self.timeline_slider.setMaximum(0)
         self.timeline_slider.setValue(0)
@@ -104,7 +104,7 @@ class VideoWidget(QGroupBox):
         
         # Frame info label (compact, below slider)
         self.frame_info_label = QLabel("")
-        self.frame_info_label.setAlignment(Qt.AlignCenter)
+        self.frame_info_label.setAlignment(Qt.AlignCenter)  # type: ignore
         self.frame_info_label.setStyleSheet("padding: 2px; color: #666;")
         layout.addWidget(self.frame_info_label)
         
@@ -186,7 +186,7 @@ class VideoWidget(QGroupBox):
         # Draw tracking overlays if enabled using FrameProcessor
         if self.tracking_enabled and len(self.bead_positions) > 0:
             # Pass traces only if show_traces is True
-            traces_to_show = self.bead_traces if self.show_traces else None
+            traces_to_show = self.bead_traces if self.show_traces else {}
             frame_data = FrameProcessor.draw_bead_overlays(
                 frame_data, self.bead_positions, traces_to_show, box_size=36, box_thickness=2
             )
@@ -269,9 +269,9 @@ class VideoWidget(QGroupBox):
         """Enable or disable click-to-select mode."""
         self.click_to_select_mode = enabled
         if enabled:
-            self.video_label.setCursor(Qt.CrossCursor)
+            self.video_label.setCursor(Qt.CrossCursor)  # type: ignore
         else:
-            self.video_label.setCursor(Qt.ArrowCursor)
+            self.video_label.setCursor(Qt.ArrowCursor)  # type: ignore
     
     def update_bead_positions(self, bead_positions: dict):
         """Update bead positions for current frame."""

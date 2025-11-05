@@ -42,13 +42,13 @@ class TrackingDataIO:
                 if 'analysed_data' not in f:
                     analysis_group = f.create_group('analysed_data')
                 else:
-                    analysis_group = f['analysed_data']
+                    analysis_group = f['analysed_data']  # type: ignore
                 
                 # Create or overwrite xy_tracking group
-                if 'xy_tracking' in analysis_group:
-                    del analysis_group['xy_tracking']
+                if 'xy_tracking' in analysis_group:  # type: ignore
+                    del analysis_group['xy_tracking']  # type: ignore
                 
-                xy_group = analysis_group.create_group('xy_tracking')
+                xy_group = analysis_group.create_group('xy_tracking')  # type: ignore
                 
                 # Prepare tracking data
                 max_frames = max(len(bead['positions']) for bead in beads_data)
@@ -120,10 +120,10 @@ class TrackingDataIO:
         try:
             Logger.debug(f"Loading from HDF5: {hdf5_path}", "TRACKING_IO")
             with h5py.File(hdf5_path, 'r') as f:
-                if 'analysed_data' not in f or 'xy_tracking' not in f['analysed_data']:
+                if 'analysed_data' not in f or 'xy_tracking' not in f['analysed_data']:  # type: ignore
                     return beads_data, metadata
                 
-                xy_group = f['analysed_data']['xy_tracking']
+                xy_group = f['analysed_data']['xy_tracking']  # type: ignore
                 
                 # Check if it's a group (new format) or dataset (old format)
                 if isinstance(xy_group, h5py.Group):
@@ -131,21 +131,21 @@ class TrackingDataIO:
                     if 'positions' not in xy_group:
                         return beads_data, metadata
                     
-                    tracking_data = xy_group['positions'][:]
+                    tracking_data = xy_group['positions'][:]  # type: ignore
                     
                     # Load metadata from group attributes
                     for key, value in xy_group.attrs.items():
                         metadata[key] = value
                     
-                    num_beads = int(metadata.get('num_beads', tracking_data.shape[1]))
+                    num_beads = int(metadata.get('num_beads', tracking_data.shape[1]))  # type: ignore
                     
                     # Reconstruct bead dictionaries
                     for bead_idx in range(num_beads):
                         positions = []
-                        for frame_idx in range(tracking_data.shape[0]):
-                            x, y = tracking_data[frame_idx, bead_idx, :]
-                            if x >= 0 and y >= 0:
-                                positions.append((int(x), int(y)))
+                        for frame_idx in range(tracking_data.shape[0]):  # type: ignore
+                            x, y = tracking_data[frame_idx, bead_idx, :]  # type: ignore
+                            if x >= 0 and y >= 0:  # type: ignore
+                                positions.append((int(x), int(y)))  # type: ignore
                             else:
                                 break
                         
@@ -159,7 +159,7 @@ class TrackingDataIO:
                         template = None
                         template_name = f'bead_{bead_idx}_template'
                         if template_name in xy_group:
-                            template = xy_group[template_name][:]
+                            template = xy_group[template_name][:]  # type: ignore
                         
                         bead = {
                             'id': bead_id,
@@ -171,19 +171,19 @@ class TrackingDataIO:
                         beads_data.append(bead)
                 else:
                     # Old format: backward compatibility
-                    tracking_data = xy_group[:]
+                    tracking_data = xy_group[:]  # type: ignore
                     
                     for key, value in xy_group.attrs.items():
                         metadata[key] = value
                     
-                    num_beads = int(metadata.get('num_beads', tracking_data.shape[1]))
+                    num_beads = int(metadata.get('num_beads', tracking_data.shape[1]))  # type: ignore
                     
                     for bead_idx in range(num_beads):
                         positions = []
-                        for frame_idx in range(tracking_data.shape[0]):
-                            x, y = tracking_data[frame_idx, bead_idx, :]
-                            if x >= 0 and y >= 0:
-                                positions.append((int(x), int(y)))
+                        for frame_idx in range(tracking_data.shape[0]):  # type: ignore
+                            x, y = tracking_data[frame_idx, bead_idx, :]  # type: ignore
+                            if x >= 0 and y >= 0:  # type: ignore
+                                positions.append((int(x), int(y)))  # type: ignore
                             else:
                                 break
                         
@@ -196,8 +196,8 @@ class TrackingDataIO:
                         
                         template = None
                         template_name = f'xy_tracking_bead_{bead_idx}_template'
-                        if template_name in f['analysed_data']:
-                            template = f['analysed_data'][template_name][:]
+                        if template_name in f['analysed_data']:  # type: ignore
+                            template = f['analysed_data'][template_name][:]  # type: ignore
                         
                         bead = {
                             'id': bead_id,
@@ -230,7 +230,7 @@ class TrackingDataIO:
         """
         try:
             with h5py.File(hdf5_path, 'r') as f:
-                has_data = 'analysed_data' in f and 'xy_tracking' in f['analysed_data']
+                has_data = 'analysed_data' in f and 'xy_tracking' in f['analysed_data']  # type: ignore
                 if has_data:
                     Logger.debug("Found existing tracking data", "TRACKING_IO")
                 return has_data

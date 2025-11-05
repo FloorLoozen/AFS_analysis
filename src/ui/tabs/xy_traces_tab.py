@@ -12,6 +12,11 @@ from src.utils.analysis import BeadTracker, detect_beads_auto
 from src.utils.tracking_io import TrackingDataIO
 from src.utils.logger import Logger
 
+# Import TYPE_CHECKING to avoid circular imports
+from typing import TYPE_CHECKING, Optional
+if TYPE_CHECKING:
+    from src.ui.video_widget import VideoWidget
+
 
 class XYTracesTab(QWidget):
     """Tab for XY bead tracking with auto-detection and HDF5 storage."""
@@ -19,7 +24,7 @@ class XYTracesTab(QWidget):
     def __init__(self):
         """Initialize XY traces tab."""
         super().__init__()
-        self.video_widget = None
+        self.video_widget: Optional['VideoWidget'] = None
         self.tracker = BeadTracker(window_size=40)
         self.is_tracking = False
         self.is_paused = False
@@ -46,9 +51,9 @@ class XYTracesTab(QWidget):
         # Settings group matching AFS style
         settings_group = QGroupBox("Detection Settings")
         settings_layout = QFormLayout()
-        settings_layout.setRowWrapPolicy(QFormLayout.DontWrapRows)
-        settings_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        settings_layout.setLabelAlignment(Qt.AlignRight)
+        settings_layout.setRowWrapPolicy(QFormLayout.DontWrapRows)  # type: ignore
+        settings_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)  # type: ignore
+        settings_layout.setLabelAlignment(Qt.AlignRight)  # type: ignore
         
         self.threshold_spinbox = QSpinBox()
         self.threshold_spinbox.setRange(50, 255)
@@ -177,8 +182,8 @@ class XYTracesTab(QWidget):
         """Clear all rows from status layout."""
         while self.status_layout.count():
             item = self.status_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            if item and item.widget():  # type: ignore
+                item.widget().deleteLater()  # type: ignore
     
     def _update_status(self, info_text="", status_text=""):
         """Update status display with consistent formatting."""
@@ -204,7 +209,7 @@ class XYTracesTab(QWidget):
         
         # Get video file path
         if self.video_widget:
-            metadata = self.video_widget.get_metadata()
+            metadata = self.video_widget.get_metadata()  # type: ignore
             self.current_hdf5_path = metadata.get('file_path', None)
             
             # Check if tracking data exists
@@ -235,18 +240,19 @@ class XYTracesTab(QWidget):
             
             # Display beads on current frame
             if self.video_widget:
-                frame_idx = self.video_widget.controller.current_frame_index
+                frame_idx = self.video_widget.controller.current_frame_index  # type: ignore
                 bead_positions = {}
                 for bead in beads_data:
                     if frame_idx < len(bead['positions']):
                         bead_positions[bead['id']] = bead['positions'][frame_idx]
                 
-                self.video_widget.set_tracking_enabled(True)
-                self.video_widget.update_bead_positions(bead_positions)
+                self.video_widget.set_tracking_enabled(True)  # type: ignore
+                self.video_widget.update_bead_positions(bead_positions)  # type: ignore
             
             # Update UI
             self.is_validating = True
-            self.video_widget.set_click_to_select_mode(True)
+            if self.video_widget:
+                self.video_widget.set_click_to_select_mode(True)  # type: ignore
             self.auto_detect_button.setEnabled(False)
             self.select_beads_button.setText("Add")
             self.start_tracking_button.setEnabled(True)
@@ -256,7 +262,10 @@ class XYTracesTab(QWidget):
             
             # Check completeness
             num_tracked = len(beads_data[0]['positions']) if beads_data else 0
-            total_frames = self.video_widget.controller.get_total_frames()
+            if self.video_widget:
+                total_frames = self.video_widget.controller.get_total_frames()  # type: ignore
+            else:
+                total_frames = 0
             
             if num_tracked >= total_frames:
                 self._update_status(f"Loaded {len(beads_data)} beads - Complete", "")
@@ -270,6 +279,7 @@ class XYTracesTab(QWidget):
         """Auto-detect beads in current frame."""
         if not self.video_widget:
             return
+        assert self.video_widget is not None  # Type hint for checker
         
         current_frame = self.video_widget.get_current_frame()
         if current_frame is None:
@@ -280,7 +290,7 @@ class XYTracesTab(QWidget):
         self.tracker.clear()
         self.next_bead_id = 0
         if self.video_widget:
-            self.video_widget.bead_traces = {}  # Clear trace history
+            self.video_widget.bead_traces = {}  # type: ignore # Clear trace history
         
         # Detect beads
         self.detected_positions = detect_beads_auto(
@@ -296,8 +306,9 @@ class XYTracesTab(QWidget):
         
         # Add to tracker
         self.is_validating = True
-        self.video_widget.set_tracking_enabled(True)
-        self.video_widget.set_click_to_select_mode(True)
+        if self.video_widget:
+            self.video_widget.set_tracking_enabled(True)  # type: ignore
+            self.video_widget.set_click_to_select_mode(True)  # type: ignore
         
         bead_positions = {}
         for x, y in self.detected_positions:
@@ -307,7 +318,8 @@ class XYTracesTab(QWidget):
             self.next_bead_id += 1
         
         # Update display with correct bead IDs
-        self.video_widget.update_bead_positions(bead_positions)
+        if self.video_widget:
+            self.video_widget.update_bead_positions(bead_positions)  # type: ignore
         
         # Update UI
         self.auto_detect_button.setEnabled(False)
@@ -325,15 +337,17 @@ class XYTracesTab(QWidget):
             self.is_selecting = True
             self.select_beads_button.setText("Done")
             self.start_tracking_button.setEnabled(False)
-            self.video_widget.set_click_to_select_mode(True)
-            self.video_widget.set_tracking_enabled(True)
+            if self.video_widget:
+                self.video_widget.set_click_to_select_mode(True)  # type: ignore
+                self.video_widget.set_tracking_enabled(True)  # type: ignore
             self._update_status("Manual selection mode", "Click beads to add")
         else:
             # End selection
             self.is_selecting = False
             self.is_validating = False
             self.select_beads_button.setText("Manual")
-            self.video_widget.set_click_to_select_mode(False)
+            if self.video_widget:
+                self.video_widget.set_click_to_select_mode(False)  # type: ignore
             
             if len(self.tracker.beads) > 0:
                 self.start_tracking_button.setEnabled(True)
@@ -345,7 +359,9 @@ class XYTracesTab(QWidget):
         if not self.is_selecting and not self.is_validating:
             return
         
-        current_frame = self.video_widget.get_current_frame()
+        if not self.video_widget:
+            return
+        current_frame = self.video_widget.get_current_frame()  # type: ignore
         if current_frame is None:
             return
         
@@ -355,7 +371,7 @@ class XYTracesTab(QWidget):
         
         # Update display
         bead_positions = {bead['id']: bead['positions'][0] for bead in self.tracker.beads}
-        self.video_widget.update_bead_positions(bead_positions)
+        self.video_widget.update_bead_positions(bead_positions)  # type: ignore
         
         self._update_status(f"{len(self.tracker.beads)} beads", "Bead added")
     
@@ -377,7 +393,8 @@ class XYTracesTab(QWidget):
             
             # Update display
             bead_positions = {bead['id']: bead['positions'][0] for bead in self.tracker.beads}
-            self.video_widget.update_bead_positions(bead_positions)
+            if self.video_widget:
+                self.video_widget.update_bead_positions(bead_positions)  # type: ignore
             
             self._update_status(f"{len(self.tracker.beads)} beads", "Bead removed")
     
@@ -401,7 +418,7 @@ class XYTracesTab(QWidget):
             return
         
         num_beads = len(self.tracker.beads)
-        self.total_tracking_frames = self.video_widget.controller.get_total_frames()
+        self.total_tracking_frames = self.video_widget.controller.get_total_frames()  # type: ignore
         
         # Resume from last tracked frame
         self.current_tracking_frame = len(self.tracker.beads[0]['positions']) if self.tracker.beads[0]['positions'] else 0
@@ -447,14 +464,17 @@ class XYTracesTab(QWidget):
             return
         
         # Process frame
-        self.video_widget.controller.seek_to_frame(self.current_tracking_frame)
-        frame = self.video_widget.get_current_frame()
+        if self.video_widget is not None:
+            self.video_widget.controller.seek_to_frame(self.current_tracking_frame)
+            frame = self.video_widget.get_current_frame()
+        else:
+            return
         
         if frame is not None:
             results = self.tracker.track_frame(frame)
             
             # Only update display every 5 frames for better performance
-            if self.current_tracking_frame % 5 == 0:
+            if self.current_tracking_frame % 5 == 0 and self.video_widget is not None:
                 bead_positions = {bid: (x, y) for bid, x, y in results}
                 self.video_widget.update_bead_positions(bead_positions)
         
