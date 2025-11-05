@@ -31,6 +31,8 @@ logs/
 tests/
 *_test.py
 test_*.py
+test*.py
+
 
 # VS Code
 .vscode/

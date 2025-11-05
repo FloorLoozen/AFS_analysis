@@ -8,7 +8,7 @@ from PyQt5.QtCore import Qt, QTimer
 import numpy as np
 from pathlib import Path
 
-from src.analysis.xy_tracking_xcorr import BeadTracker, detect_beads_auto
+from src.analysis import BeadTracker, detect_beads_auto
 from src.utils.tracking_io import TrackingDataIO
 from src.utils.logger import Logger
 
@@ -65,8 +65,8 @@ class XYTracesTab(QWidget):
         settings_layout.addRow("Brightness:", self.threshold_spinbox)
         
         self.min_size_spinbox = QSpinBox()
-        self.min_size_spinbox.setRange(10, 500)
-        self.min_size_spinbox.setValue(50)
+        self.min_size_spinbox.setRange(100, 2000)
+        self.min_size_spinbox.setValue(500)
         self.min_size_spinbox.setFixedWidth(80)
         settings_layout.addRow("Min Size:", self.min_size_spinbox)
         
@@ -75,12 +75,6 @@ class XYTracesTab(QWidget):
         self.max_size_spinbox.setValue(5000)
         self.max_size_spinbox.setFixedWidth(80)
         settings_layout.addRow("Max Size:", self.max_size_spinbox)
-        
-        # Fast tracking mode checkbox
-        self.fast_tracking_checkbox = QCheckBox("Fast Mode (recommended)")
-        self.fast_tracking_checkbox.setChecked(True)  # Default to fast mode
-        self.fast_tracking_checkbox.setToolTip("Fast: Gaussian refinement (accurate & fast). Precise: Quadrant Interpolation (slightly better for difficult beads).")
-        settings_layout.addRow("", self.fast_tracking_checkbox)
         
         settings_group.setLayout(settings_layout)
         layout.addWidget(settings_group)
@@ -425,9 +419,6 @@ class XYTracesTab(QWidget):
         """Start tracking beads through video with auto-save."""
         if not self.video_widget or len(self.tracker.beads) == 0:
             return
-        
-        # Update tracker to use fast mode setting
-        self.tracker.use_fast_tracking = self.fast_tracking_checkbox.isChecked()
         
         num_beads = len(self.tracker.beads)
         self.total_tracking_frames = self.video_widget.controller.get_total_frames()  # type: ignore
