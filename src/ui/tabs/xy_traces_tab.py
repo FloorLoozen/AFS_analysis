@@ -2,7 +2,7 @@
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-    QLabel, QMessageBox, QFileDialog, QSpinBox, QGroupBox, QFormLayout
+    QLabel, QMessageBox, QFileDialog, QSpinBox, QGroupBox, QFormLayout, QCheckBox
 )
 from PyQt5.QtCore import Qt, QTimer
 import numpy as np
@@ -134,6 +134,12 @@ class XYTracesTab(QWidget):
         self.clear_button.setFixedWidth(60)
         self.clear_button.clicked.connect(self._on_clear_clicked)
         button_row2.addWidget(self.clear_button)
+        
+        self.show_traces_checkbox = QCheckBox("Show Traces")
+        self.show_traces_checkbox.setEnabled(False)
+        self.show_traces_checkbox.setChecked(True)  # Traces shown by default
+        self.show_traces_checkbox.stateChanged.connect(self._on_toggle_traces_clicked)
+        button_row2.addWidget(self.show_traces_checkbox)
         
         button_row2.addStretch()
         controls_layout.addLayout(button_row2)
@@ -270,6 +276,12 @@ class XYTracesTab(QWidget):
             QMessageBox.warning(self, "No Frame", "No frame available.")
             return
         
+        # Clear any existing tracking data and traces
+        self.tracker.clear()
+        self.next_bead_id = 0
+        if self.video_widget:
+            self.video_widget.bead_traces = {}  # Clear trace history
+        
         # Detect beads
         self.detected_positions = detect_beads_auto(
             current_frame,
@@ -302,6 +314,7 @@ class XYTracesTab(QWidget):
         self.select_beads_button.setText("Add")
         self.start_tracking_button.setEnabled(True)
         self.clear_button.setEnabled(True)
+        self.show_traces_checkbox.setEnabled(True)
         
         self._update_status(f"{len(self.detected_positions)} beads detected", "R-click remove, L-click add")
     
@@ -444,12 +457,6 @@ class XYTracesTab(QWidget):
             if self.current_tracking_frame % 5 == 0:
                 bead_positions = {bid: (x, y) for bid, x, y in results}
                 self.video_widget.update_bead_positions(bead_positions)
-            
-            # Log beads with high lost frame counts
-            if self.current_tracking_frame % 50 == 0:
-                for bead in self.tracker.beads:
-                    if bead['lost_frames'] > 5:
-                        Logger.debug(f"Bead {bead['id']} lost for {bead['lost_frames']} frames (score: {bead.get('last_good_match', 0):.2f})", "XY_TAB")
         
         # Update status and save
         num_beads = len(self.tracker.beads)
@@ -587,6 +594,19 @@ class XYTracesTab(QWidget):
         if reply == QMessageBox.Yes:
             self._reset_tracking()
     
+    def _on_toggle_traces_clicked(self):
+        """Toggle trace visibility on/off."""
+        if not self.video_widget:
+            return
+        
+        # Update the show_traces flag based on checkbox state
+        self.video_widget.show_traces = self.show_traces_checkbox.isChecked()
+        
+        # Force redraw
+        if self.video_widget.last_displayed_frame is not None:
+            frame_index = self.video_widget.controller.current_frame_index
+            self.video_widget._on_frame_changed(frame_index, self.video_widget.last_displayed_frame.copy())
+    
     def _reset_tracking(self):
         """Reset tracking state."""
         self.tracker.clear()
@@ -597,6 +617,7 @@ class XYTracesTab(QWidget):
         self.detected_positions = []
         
         if self.video_widget:
+            self.video_widget.bead_traces = {}  # Clear trace history
             self.video_widget.update_bead_positions({})
             self.video_widget.set_tracking_enabled(False)
             self.video_widget.set_click_to_select_mode(False)
@@ -606,6 +627,7 @@ class XYTracesTab(QWidget):
         self.start_tracking_button.setText("Start Tracking")
         self.start_tracking_button.setEnabled(False)
         self.clear_button.setEnabled(False)
+        self.show_traces_checkbox.setEnabled(False)
         self.export_button.setEnabled(False)
         self.save_button.setEnabled(False)
         self._clear_status()

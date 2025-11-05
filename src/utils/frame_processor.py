@@ -48,13 +48,14 @@ class FrameProcessor:
     
     @staticmethod
     def draw_bead_overlays(frame: np.ndarray, bead_positions: Dict[int, Tuple[int, int]], 
-                          box_size: int = 30, box_thickness: int = 1) -> np.ndarray:
+                          bead_traces: Dict[int, list] = None, box_size: int = 30, box_thickness: int = 1) -> np.ndarray:
         """
-        Draw tracking overlays on frame.
+        Draw tracking overlays on frame with live traces.
         
         Args:
             frame: Input frame (will be copied, not modified)
             bead_positions: Dictionary mapping bead_id to (x, y) position
+            bead_traces: Dictionary mapping bead_id to list of (x, y) positions for trace history
             box_size: Size of box around bead
             box_thickness: Thickness of box lines
         
@@ -70,15 +71,31 @@ class FrameProcessor:
         
         # Color for overlays (green in RGB)
         color = (0, 255, 0)
+        trace_color = (255, 255, 0)  # Cyan for traces
         
+        # Draw traces first (so they appear behind boxes)
+        if bead_traces:
+            for bead_id, trace in bead_traces.items():
+                if len(trace) > 1:
+                    # Draw trace as connected lines
+                    for i in range(len(trace) - 1):
+                        # Convert to integers for OpenCV (handles sub-pixel float coordinates)
+                        pt1 = (int(round(trace[i][0])), int(round(trace[i][1])))
+                        pt2 = (int(round(trace[i + 1][0])), int(round(trace[i + 1][1])))
+                        cv2.line(frame_with_overlay, pt1, pt2, trace_color, 1)
+        
+        # Draw boxes and labels on top of traces
         for bead_id, (x, y) in bead_positions.items():
+            # Convert to integers for OpenCV (handles sub-pixel float coordinates)
+            x_int, y_int = int(round(x)), int(round(y))
+            
             # Draw box around bead
-            pt1 = (x - half_size, y - half_size)
-            pt2 = (x + half_size, y + half_size)
+            pt1 = (x_int - half_size, y_int - half_size)
+            pt2 = (x_int + half_size, y_int + half_size)
             cv2.rectangle(frame_with_overlay, pt1, pt2, color, box_thickness)
             
             # Draw label
-            label_pos = (x - half_size, y - half_size - 5)
+            label_pos = (x_int - half_size, y_int - half_size - 5)
             cv2.putText(frame_with_overlay, str(bead_id + 1), 
                        label_pos,
                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)

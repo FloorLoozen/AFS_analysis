@@ -1,282 +1,376 @@
-"""Analysis algorithms for video data."""
+﻿"""XY traces tracking - used by XY Traces tab only. No analysis performed."""
 
 import numpy as np
 import cv2
-from typing import List, Tuple, Optional, Dict, Any
-
-
-class TrackingResult:
-    """Container for tracking results."""
-    
-    def __init__(self):
-        self.positions: List[Tuple[float, float]] = []
-        self.frame_indices: List[int] = []
-        self.metadata: Dict[str, Any] = {}
-    
-    def add_position(self, frame_index: int, x: float, y: float):
-        """Add a tracked position."""
-        self.frame_indices.append(frame_index)
-        self.positions.append((x, y))
-    
-    def get_x_positions(self) -> np.ndarray:
-        """Get X positions as array."""
-        return np.array([pos[0] for pos in self.positions])
-    
-    def get_y_positions(self) -> np.ndarray:
-        """Get Y positions as array."""
-        return np.array([pos[1] for pos in self.positions])
-    
-    def get_displacement(self) -> np.ndarray:
-        """Calculate total displacement from origin."""
-        positions = np.array(self.positions)
-        if len(positions) == 0:
-            return np.array([])
-        
-        origin = positions[0]
-        return np.sqrt(np.sum((positions - origin) ** 2, axis=1))
-    
-    def get_velocity(self, dt: float = 1.0) -> np.ndarray:
-        """
-        Calculate velocity between frames.
-        
-        Args:
-            dt: Time step between frames
-        
-        Returns:
-            Array of velocities
-        """
-        positions = np.array(self.positions)
-        if len(positions) < 2:
-            return np.array([])
-        
-        diff = np.diff(positions, axis=0)
-        distances = np.sqrt(np.sum(diff ** 2, axis=1))
-        return distances / dt
-
-
-def detect_beads_auto(frame: np.ndarray, min_area: int = 50, max_area: int = 5000, 
-                       threshold_value: int = 150) -> List[Tuple[int, int]]:
-    """
-    Automatically detect bright circular beads in a frame.
-    
-    Args:
-        frame: Input frame (RGB or grayscale)
-        min_area: Minimum area of bead in pixels
-        max_area: Maximum area of bead in pixels
-        threshold_value: Brightness threshold (0-255)
-    
-    Returns:
-        List of (x, y) center positions of detected beads
-    """
-    # Convert to grayscale if needed
-    if len(frame.shape) == 3:
-        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
-    else:
-        gray = frame
-    
-    # Apply threshold to get bright regions
-    _, binary = cv2.threshold(gray, threshold_value, 255, cv2.THRESH_BINARY)
-    
-    # Find contours
-    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    bead_positions = []
-    
-    for contour in contours:
-        area = cv2.contourArea(contour)
-        
-        # Filter by area
-        if min_area <= area <= max_area:
-            # Calculate centroid
-            M = cv2.moments(contour)
-            if M["m00"] != 0:
-                cx = int(M["m10"] / M["m00"])
-                cy = int(M["m01"] / M["m00"])
-                
-                # Check circularity (optional, helps filter out non-bead objects)
-                perimeter = cv2.arcLength(contour, True)
-                if perimeter > 0:
-                    circularity = 4 * np.pi * area / (perimeter * perimeter)
-                    if circularity > 0.5:  # Reasonably circular
-                        bead_positions.append((cx, cy))
-    
-    return bead_positions
+from typing import List, Tuple, Dict, Any, Optional
 
 
 class BeadTracker:
-    """Tracks multiple beads using adaptive template matching."""
+    """Store XY traces for beads - used by XY Traces tab."""
     
     def __init__(self, window_size: int = 40):
-        """
-        Initialize bead tracker.
-        
-        Args:
-            window_size: Size of tracking window around bead
-        """
+        """Initialize bead tracker."""
         self.window_size = window_size
-        self.beads: List[Dict[str, Any]] = []  # List of beads with their data
+        self.beads: List[Dict[str, Any]] = []
+        self.template_size = 30
         
     def add_bead(self, frame: np.ndarray, x: int, y: int, bead_id: int):
-        """
-        Add a new bead to track.
-        
-        Args:
-            frame: First frame to extract template from
-            x, y: Initial position of bead center
-            bead_id: Unique ID for this bead
-        """
-        # Extract template around the bead
-        half_size = self.window_size // 2
-        h, w = frame.shape[:2]
-        
-        # Ensure we don't go out of bounds
-        y1 = max(0, y - half_size)
-        y2 = min(h, y + half_size)
-        x1 = max(0, x - half_size)
-        x2 = min(w, x + half_size)
-        
-        template = frame[y1:y2, x1:x2].copy()
-        
-        # Convert to grayscale if needed
-        if len(template.shape) == 3:
-            template_gray = cv2.cvtColor(template, cv2.COLOR_RGB2GRAY)
-        else:
-            template_gray = template
-        
+        """Add a new bead to track."""
         bead = {
             'id': bead_id,
-            'template': template_gray,
-            'positions': [(x, y)],  # List of (x, y) positions for each frame
+            'positions': [(x, y)],
             'initial_pos': (x, y),
-            'lost_frames': 0,  # Counter for consecutive lost frames
-            'last_good_match': 1.0  # Last good match score
+            'template': None,
+            'velocity': (0, 0)
         }
-        
         self.beads.append(bead)
     
-    def track_frame(self, frame: np.ndarray, search_radius: int = 120, 
-                    min_match_score: float = 0.25, update_template: bool = True,
-                    max_lost_frames: int = 50) -> List[Tuple[int, int, int]]:
+    def track_frame(self, frame: np.ndarray) -> List[Tuple[int, int, int]]:
         """
-        Track all beads in a new frame with adaptive template matching.
+        Track beads using COM + Quadrant Interpolation algorithm.
+        Based on Cnossen et al., 2019 and qtrk implementation.
         
         Args:
-            frame: New frame to track beads in
-            search_radius: How far from last position to search (increased default)
-            min_match_score: Minimum correlation score to accept (0-1, lowered for robustness)
-            update_template: Whether to update template with good matches
-            max_lost_frames: Maximum frames to keep searching before giving up
-        
+            frame: Current video frame (grayscale or RGB)
+            
         Returns:
-            List of (bead_id, x, y) positions
+            List of (bead_id, x, y) tuples with updated positions
         """
+        # Convert to grayscale and float
         if len(frame.shape) == 3:
-            frame_gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
         else:
-            frame_gray = frame
+            gray = frame.astype(np.float32)
         
         results = []
         
         for bead in self.beads:
-            template = bead['template']
             last_x, last_y = bead['positions'][-1]
             
-            # Define search region
-            h, w = frame_gray.shape
-            th, tw = template.shape
+            # Extract ROI around last known position
+            roi_size = self.window_size
+            x1 = max(0, int(last_x - roi_size))
+            y1 = max(0, int(last_y - roi_size))
+            x2 = min(gray.shape[1], int(last_x + roi_size))
+            y2 = min(gray.shape[0], int(last_y + roi_size))
             
-            # Increase search radius if bead was recently lost
-            effective_radius = search_radius
-            if bead['lost_frames'] > 0:
-                # Expand search for lost beads - up to 3x the normal radius
-                effective_radius = min(search_radius * (1 + bead['lost_frames'] // 10), 300)
+            if x2 <= x1 or y2 <= y1:
+                # ROI out of bounds, keep last position
+                bead['positions'].append((last_x, last_y))
+                results.append((bead['id'], last_x, last_y))
+                continue
             
-            # Search region around last known position
-            x1 = max(0, last_x - effective_radius)
-            y1 = max(0, last_y - effective_radius)
-            x2 = min(w, last_x + effective_radius + tw)
-            y2 = min(h, last_y + effective_radius + th)
+            roi = gray[y1:y2, x1:x2]
             
-            search_region = frame_gray[y1:y2, x1:x2]
+            # Step 1: Center-of-Mass computation for initial estimate
+            com_x, com_y = self._compute_center_of_mass(roi)
             
-            # Template matching
-            if search_region.shape[0] < th or search_region.shape[1] < tw:
-                # Search region too small, use last position
-                new_x, new_y = last_x, last_y
-                match_score = bead.get('last_good_match', 0.0) * 0.95  # Decay confidence
-            else:
-                # Try multiple matching methods for robustness
-                result_normed = cv2.matchTemplate(search_region, template, cv2.TM_CCOEFF_NORMED)
-                _, max_val_normed, _, max_loc_normed = cv2.minMaxLoc(result_normed)
-                
-                # Also try TM_CCORR_NORMED for better handling of brightness changes
-                result_ccorr = cv2.matchTemplate(search_region, template, cv2.TM_CCORR_NORMED)
-                _, max_val_ccorr, _, max_loc_ccorr = cv2.minMaxLoc(result_ccorr)
-                
-                # Use the better match
-                if max_val_normed > max_val_ccorr:
-                    max_val = max_val_normed
-                    max_loc = max_loc_normed
-                else:
-                    max_val = max_val_ccorr
-                    max_loc = max_loc_ccorr
-                
-                # Convert to frame coordinates
-                match_x = x1 + max_loc[0] + tw // 2
-                match_y = y1 + max_loc[1] + th // 2
-                match_score = max_val
-                
-                # Distance from last position - penalize large jumps between beads
-                dx = match_x - last_x
-                dy = match_y - last_y
-                distance = np.sqrt(dx*dx + dy*dy)
-                
-                # Adaptive threshold: lower for stationary beads, higher for moving
-                adaptive_threshold = min_match_score
-                if bead['lost_frames'] == 0 and distance < 20:
-                    # Bead moving slowly - be more strict
-                    adaptive_threshold = max(min_match_score, 0.4)
-                elif distance > effective_radius * 0.7:
-                    # Large jump - could be tracking wrong bead
-                    adaptive_threshold = max(min_match_score, 0.5)
-                
-                # Check if match is good enough
-                if match_score >= adaptive_threshold:
-                    # Good match - accept new position
-                    new_x, new_y = match_x, match_y
-                    
-                    # Update template if match is strong
-                    if update_template and match_score > 0.55:
-                        # Extract new template region
-                        ny1 = max(0, new_y - th // 2)
-                        ny2 = min(h, new_y + th // 2)
-                        nx1 = max(0, new_x - tw // 2)
-                        nx2 = min(w, new_x + tw // 2)
-                        
-                        new_template = frame_gray[ny1:ny2, nx1:nx2]
-                        
-                        # Adaptive template update: blend with old template
-                        if new_template.shape == template.shape:
-                            # Higher blending for better matches
-                            alpha = 0.2 if match_score > 0.7 else 0.1
-                            bead['template'] = cv2.addWeighted(
-                                template.astype(np.float32), 1 - alpha,
-                                new_template.astype(np.float32), alpha, 0
-                            ).astype(np.uint8)
-                    
-                    bead['lost_frames'] = 0
-                    bead['last_good_match'] = match_score
-                else:
-                    # Poor match - might be lost, keep last position
-                    new_x, new_y = last_x, last_y
-                    bead['lost_frames'] += 1
-                    bead['last_good_match'] = max(match_score, bead.get('last_good_match', 0.0) * 0.95)
+            # Convert COM to global coordinates
+            global_x = x1 + com_x
+            global_y = y1 + com_y
             
-            # Store new position (always store, maintaining bead identity)
-            bead['positions'].append((new_x, new_y))
-            results.append((bead['id'], new_x, new_y))
+            # Step 2: Quadrant Interpolation refinement (multiple iterations)
+            # Parameters from qtrk: radialSteps ~80, angularSteps starts low and increases
+            refined_x, refined_y = self._quadrant_interpolation(
+                gray, global_x, global_y, 
+                radial_steps=40,      # Number of radial samples
+                angular_steps_per_q=32,  # Angular steps per quadrant (start low)
+                min_radius=2.0,       # Inner radius
+                max_radius=15.0,      # Outer radius  
+                iterations=3,         # Number of iterations
+                angular_step_factor=1.5  # Increase angular resolution each iteration
+            )
+            
+            # Store updated position
+            bead['positions'].append((refined_x, refined_y))
+            results.append((bead['id'], refined_x, refined_y))
         
         return results
+    
+    def _compute_center_of_mass(self, roi: np.ndarray) -> Tuple[float, float]:
+        """
+        Compute center-of-mass of intensity in ROI.
+        
+        Args:
+            roi: Region of interest image
+            
+        Returns:
+            (x, y) center-of-mass coordinates relative to ROI
+        """
+        # Subtract background (minimum value)
+        roi_bg_subtracted = roi - np.min(roi)
+        
+        # Compute total intensity
+        total = np.sum(roi_bg_subtracted)
+        
+        if total == 0:
+            # No signal, return center of ROI
+            return roi.shape[1] / 2.0, roi.shape[0] / 2.0
+        
+        # Create coordinate grids
+        y_coords, x_coords = np.indices(roi.shape)
+        
+        # Compute weighted average
+        com_x = np.sum(x_coords * roi_bg_subtracted) / total
+        com_y = np.sum(y_coords * roi_bg_subtracted) / total
+        
+        return com_x, com_y
+    
+    def _quadrant_interpolation(self, frame: np.ndarray, x: float, y: float, 
+                                radial_steps: int = 40, angular_steps_per_q: int = 32,
+                                min_radius: float = 2.0, max_radius: float = 15.0,
+                                iterations: int = 3, angular_step_factor: float = 1.5) -> Tuple[float, float]:
+        """
+        Refine bead position using Quadrant Interpolation algorithm.
+        
+        Based on qtrk implementation by Cnossen et al.
+        
+        Args:
+            frame: Full frame image
+            x, y: Initial position estimate
+            radial_steps: Number of radial samples (nr)
+            angular_steps_per_q: Angular steps per quadrant (starts low, increases)
+            min_radius: Minimum radius for sampling
+            max_radius: Maximum radius for sampling  
+            iterations: Number of QI refinement iterations
+            angular_step_factor: Factor to increase angular steps each iteration
+            
+        Returns:
+            (x, y) refined position
+        """
+        center_x, center_y = x, y
+        nr = radial_steps
+        
+        # Build trigonometric table for quadrant (0 to 90 degrees)
+        trig_table = []
+        for j in range(angular_steps_per_q):
+            ang = 0.5 * np.pi * (j + 0.5) / angular_steps_per_q
+            trig_table.append((np.cos(ang), np.sin(ang)))
+        
+        pixels_per_prof_len = (max_radius - min_radius) / radial_steps
+        angular_steps = angular_steps_per_q / (angular_step_factor ** iterations)
+        
+        for k in range(iterations):
+            angular_steps = int(max(angular_steps, 10))  # Minimum 10 samples
+            
+            # Compute all 4 quadrants
+            q0 = self._compute_quadrant_profile(frame, center_x, center_y, nr, angular_steps, 
+                                               0, min_radius, max_radius, trig_table)
+            q1 = self._compute_quadrant_profile(frame, center_x, center_y, nr, angular_steps,
+                                               1, min_radius, max_radius, trig_table)
+            q2 = self._compute_quadrant_profile(frame, center_x, center_y, nr, angular_steps,
+                                               2, min_radius, max_radius, trig_table)
+            q3 = self._compute_quadrant_profile(frame, center_x, center_y, nr, angular_steps,
+                                               3, min_radius, max_radius, trig_table)
+            
+            if q0 is None or q1 is None or q2 is None or q3 is None:
+                # Boundary hit
+                break
+            
+            # Build X profile: Ix = [ qL(-r)  qR(r) ]
+            # qL = q1 + q2 (left side, reversed)
+            # qR = q0 + q3 (right side)
+            x_profile = np.concatenate([
+                (q1 + q2)[::-1],  # Left, reversed
+                (q0 + q3)          # Right
+            ])
+            
+            # Build Y profile: Iy = [ qB(-r)  qT(r) ]
+            # qT = q0 + q1 (top/bottom depends on coordinate system)
+            # qB = q2 + q3
+            y_profile = np.concatenate([
+                (q2 + q3)[::-1],  # Bottom, reversed
+                (q0 + q1)          # Top
+            ])
+            
+            # Compute offsets using FFT auto-correlation
+            offset_x = self._qi_compute_offset(x_profile, nr)
+            offset_y = self._qi_compute_offset(y_profile, nr)
+            
+            # Update position
+            center_x += offset_x * pixels_per_prof_len
+            center_y += offset_y * pixels_per_prof_len
+            
+            # Increase angular resolution for next iteration
+            angular_steps *= angular_step_factor
+        
+        return center_x, center_y
+    
+    def _compute_quadrant_profile(self, frame: np.ndarray, cx: float, cy: float,
+                                  radial_steps: int, angular_steps: int, quadrant: int,
+                                  min_radius: float, max_radius: float,
+                                  trig_table: List[Tuple[float, float]]) -> Optional[np.ndarray]:
+        """
+        Compute radial profile for one quadrant.
+        
+        Based on qtrk ComputeQuadrantProfile.
+        
+        Args:
+            frame: Image frame
+            cx, cy: Center position
+            radial_steps: Number of radial bins
+            angular_steps: Number of angular samples
+            quadrant: Quadrant index (0-3)
+            min_radius: Minimum sampling radius
+            max_radius: Maximum sampling radius
+            trig_table: Precomputed cos/sin values for 0-90 degrees
+            
+        Returns:
+            Radial profile array, or None if out of bounds
+        """
+        # Quadrant multipliers: controls which direction to sample
+        # q0: (+x, +y), q1: (-x, +y), q2: (-x, -y), q3: (+x, -y)
+        qmat = [(1, 1), (-1, 1), (-1, -1), (1, -1)]
+        mx, my = qmat[quadrant]
+        
+        profile = np.zeros(radial_steps, dtype=np.float32)
+        rstep = (max_radius - min_radius) / radial_steps
+        
+        # Compute mean for background
+        mean = np.mean(frame)
+        
+        # For each radial bin
+        for i in range(radial_steps):
+            r = min_radius + rstep * i
+            total = 0.0
+            count = 0
+            
+            # Sample along angular direction using precomputed trig table
+            angstepf = len(trig_table) / angular_steps
+            for a in range(angular_steps):
+                j = int(angstepf * a)
+                cos_val, sin_val = trig_table[j]
+                
+                # Calculate sample position
+                sample_x = cx + mx * cos_val * r
+                sample_y = cy + my * sin_val * r
+                
+                # Bilinear interpolation
+                value = self._bilinear_interpolate(frame, sample_x, sample_y)
+                
+                if value is not None:
+                    total += value
+                    count += 1
+            
+            # Need at least a few samples
+            if count >= 3:
+                profile[i] = total / count
+            else:
+                profile[i] = mean
+        
+        return profile
+    
+    def _qi_compute_offset(self, profile: np.ndarray, nr: int) -> float:
+        """
+        Compute offset using FFT-based auto-correlation.
+        
+        Based on qtrk QI_ComputeOffset implementation.
+        
+        Args:
+            profile: Combined profile of length 2*nr
+            nr: Number of radial steps
+            
+        Returns:
+            Offset in units of profile bins
+        """
+        # Convert to complex for FFT
+        prof_complex = profile.astype(np.complex64)
+        prof_reverse = prof_complex[::-1]
+        
+        # Forward FFT of both
+        fft_prof = np.fft.fft(prof_complex)
+        fft_rev = np.fft.fft(prof_reverse)
+        
+        # Multiply with conjugate
+        fft_prod = fft_prof * np.conj(fft_rev)
+        
+        # Inverse FFT to get auto-correlation
+        autoconv = np.fft.ifft(fft_prod).real
+        
+        # Shift the autocorrelation (circular shift by nr)
+        autoconv_shifted = np.roll(autoconv, nr)
+        
+        # Find maximum with sub-pixel interpolation
+        max_pos = self._compute_max_interp(autoconv_shifted)
+        
+        # Convert to offset (from qtrk: (maxPos - nr) * (pi/4))
+        offset = (max_pos - nr) * (np.pi / 4.0)
+        
+        return offset
+    
+    def _compute_max_interp(self, data: np.ndarray) -> float:
+        """
+        Find maximum position with sub-pixel interpolation using least-squares quadratic fit.
+        
+        Based on qtrk ComputeMaxInterp.
+        
+        Args:
+            data: 1D array
+            
+        Returns:
+            Sub-pixel position of maximum
+        """
+        # Find integer maximum
+        i_max = np.argmax(data)
+        
+        # Use 5 points around maximum for quadratic fit (as in QI_LSQFIT_NWEIGHTS)
+        num_pts = 5
+        start_pos = max(i_max - num_pts // 2, 0)
+        end_pos = min(i_max + (num_pts - num_pts // 2), len(data))
+        num_points = end_pos - start_pos
+        
+        if num_points < 3:
+            return float(i_max)
+        
+        # Extract points around maximum
+        xs = np.arange(start_pos, end_pos) - i_max
+        ys = data[start_pos:end_pos]
+        
+        # Fit quadratic: y = a*x^2 + b*x + c
+        # Using least squares
+        try:
+            A = np.column_stack([xs**2, xs, np.ones_like(xs)])
+            coeffs = np.linalg.lstsq(A, ys, rcond=None)[0]
+            a, b, c = coeffs
+            
+            # Maximum of quadratic is at x = -b/(2a)
+            if abs(a) > 1e-9:
+                interp_max = -b / (2 * a)
+                return float(i_max) + interp_max
+            else:
+                return float(i_max)
+        except:
+            return float(i_max)
+    
+    def _bilinear_interpolate(self, frame: np.ndarray, x: float, y: float) -> Optional[float]:
+        """
+        Bilinear interpolation at sub-pixel position.
+        
+        Args:
+            frame: Image frame
+            x, y: Sub-pixel coordinates
+            
+        Returns:
+            Interpolated intensity value, or None if out of bounds
+        """
+        x0, y0 = int(np.floor(x)), int(np.floor(y))
+        x1, y1 = x0 + 1, y0 + 1
+        
+        # Check bounds
+        if x0 < 0 or y0 < 0 or x1 >= frame.shape[1] or y1 >= frame.shape[0]:
+            return None
+        
+        # Interpolation weights
+        wx = x - x0
+        wy = y - y0
+        
+        # Bilinear interpolation
+        value = (1 - wx) * (1 - wy) * frame[y0, x0] + \
+                wx * (1 - wy) * frame[y0, x1] + \
+                (1 - wx) * wy * frame[y1, x0] + \
+                wx * wy * frame[y1, x1]
+        
+        return float(value)
     
     def get_bead_positions(self, bead_id: int) -> List[Tuple[int, int]]:
         """Get all positions for a specific bead."""
@@ -294,12 +388,7 @@ class BeadTracker:
         return len(self.beads)
     
     def load_from_data(self, beads_data: List[Dict[str, Any]]):
-        """
-        Load tracking data from saved format.
-        
-        Args:
-            beads_data: List of bead dictionaries with id, positions, template
-        """
+        """Load tracking data from saved format."""
         self.beads = beads_data
     
     def clear(self):
@@ -311,136 +400,27 @@ class BeadTracker:
         self.beads = [bead for bead in self.beads if bead['id'] != bead_id]
 
 
-class XYTracker:
-    """Tracks XY position of features in video frames."""
+def detect_beads_auto(frame: np.ndarray, min_area: int = 50, max_area: int = 5000, threshold_value: int = 150) -> List[Tuple[int, int]]:
+    """Auto-detect beads - used by XY Traces tab."""
+    if len(frame.shape) == 3:
+        gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+    else:
+        gray = frame
     
-    def __init__(self):
-        self.tracking_result = TrackingResult()
+    _, binary = cv2.threshold(gray, threshold_value, 255, cv2.THRESH_BINARY)
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     
-    def track_centroid(self, frames: np.ndarray) -> TrackingResult:
-        """
-        Track centroid of brightest region across frames.
-        
-        Args:
-            frames: Array of frames (num_frames, height, width, channels) or (num_frames, height, width)
-        
-        Returns:
-            TrackingResult with positions
-        """
-        self.tracking_result = TrackingResult()
-        
-        for i, frame in enumerate(frames):
-            # Convert to grayscale if needed
-            if len(frame.shape) == 3:
-                gray = np.mean(frame, axis=2).astype(np.uint8)
-            else:
-                gray = frame
-            
-            # Find brightest region (simple centroid)
-            # Threshold at 50% of max intensity
-            threshold = np.max(gray) * 0.5
-            mask = gray > threshold
-            
-            if np.any(mask):
-                # Calculate centroid
-                y_coords, x_coords = np.where(mask)
-                x_center = np.mean(x_coords)
-                y_center = np.mean(y_coords)
-                
-                self.tracking_result.add_position(i, float(x_center), float(y_center))
-            else:
-                # No bright region found, use previous position or center
-                if len(self.tracking_result.positions) > 0:
-                    prev_pos = self.tracking_result.positions[-1]
-                    self.tracking_result.add_position(i, prev_pos[0], prev_pos[1])
-                else:
-                    # Use frame center
-                    h, w = gray.shape
-                    self.tracking_result.add_position(i, w / 2, h / 2)
-        
-        self.tracking_result.metadata['method'] = 'centroid'
-        return self.tracking_result
-    
-    def track_template(self, frames: np.ndarray, template: np.ndarray) -> TrackingResult:
-        """
-        Track using template matching.
-        
-        Args:
-            frames: Array of frames
-            template: Template to match
-        
-        Returns:
-            TrackingResult with positions
-        """
-        # Placeholder for template matching implementation
-        # TODO: Implement cv2.matchTemplate based tracking
-        self.tracking_result = TrackingResult()
-        self.tracking_result.metadata['method'] = 'template'
-        return self.tracking_result
-
-
-class ZTracker:
-    """Tracks Z-axis (vertical) displacement in video frames."""
-    
-    def __init__(self):
-        self.z_values: List[float] = []
-        self.frame_indices: List[int] = []
-    
-    def track_intensity_variance(self, frames: np.ndarray, roi: Optional[Tuple[int, int, int, int]] = None) -> Tuple[List[int], List[float]]:
-        """
-        Track Z displacement by measuring focus/sharpness (variance of Laplacian).
-        
-        Args:
-            frames: Array of frames
-            roi: Optional ROI as (x, y, width, height)
-        
-        Returns:
-            Tuple of (frame_indices, z_values)
-        """
-        self.z_values = []
-        self.frame_indices = []
-        
-        for i, frame in enumerate(frames):
-            # Convert to grayscale if needed
-            if len(frame.shape) == 3:
-                gray = np.mean(frame, axis=2).astype(np.uint8)
-            else:
-                gray = frame
-            
-            # Extract ROI if specified
-            if roi:
-                x, y, w, h = roi
-                gray = gray[y:y+h, x:x+w]
-            
-            # Calculate variance of Laplacian (focus measure)
-            if cv2 is not None:
-                laplacian = cv2.Laplacian(gray, cv2.CV_64F)
-                variance = float(laplacian.var())
-            else:
-                # Fallback: use standard deviation as focus measure
-                variance = float(np.std(gray))
-            
-            self.z_values.append(variance)
-            self.frame_indices.append(i)
-        
-        return self.frame_indices, self.z_values
-    
-    def get_relative_z(self, reference_frame: int = 0) -> np.ndarray:
-        """
-        Get Z values relative to a reference frame.
-        
-        Args:
-            reference_frame: Index of frame to use as reference
-        
-        Returns:
-            Array of relative Z values
-        """
-        z_array = np.array(self.z_values)
-        if len(z_array) == 0:
-            return np.array([])
-        
-        if reference_frame >= len(z_array):
-            reference_frame = 0
-        
-        reference_value = z_array[reference_frame]
-        return z_array - reference_value
+    bead_positions = []
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if min_area <= area <= max_area:
+            M = cv2.moments(contour)
+            if M["m00"] != 0:
+                cx = int(M["m10"] / M["m00"])
+                cy = int(M["m01"] / M["m00"])
+                perimeter = cv2.arcLength(contour, True)
+                if perimeter > 0:
+                    circularity = 4 * np.pi * area / (perimeter * perimeter)
+                    if circularity > 0.5:
+                        bead_positions.append((cx, cy))
+    return bead_positions

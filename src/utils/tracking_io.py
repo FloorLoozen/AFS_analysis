@@ -241,7 +241,7 @@ class TrackingDataIO:
     @staticmethod
     def export_to_csv(hdf5_path: str, output_csv_path: Optional[str] = None) -> str:
         """
-        Export tracking data to CSV file with time column.
+        Export tracking data to CSV file.
         
         Args:
             hdf5_path: Path to HDF5 file with tracking data
@@ -259,31 +259,14 @@ class TrackingDataIO:
         if not beads_data:
             raise ValueError("No tracking data available to export")
         
-        # Get FPS from HDF5 file to calculate time
-        fps = 30.0  # Default
-        try:
-            with h5py.File(hdf5_path, 'r') as f:
-                # Try to find FPS in video metadata
-                video_paths = ['raw_data/main_video', 'data/main_video', 'main_video']
-                for path in video_paths:
-                    if path in f:
-                        if 'actual_fps' in f[path].attrs:
-                            fps = float(f[path].attrs['actual_fps'])
-                            break
-                        elif 'fps' in f[path].attrs:
-                            fps = float(f[path].attrs['fps'])
-                            break
-        except Exception as e:
-            Logger.debug(f"Could not read FPS, using default: {e}", "TRACKING_IO")
-        
-        Logger.debug(f"Exporting to CSV with FPS={fps}", "TRACKING_IO")
+        Logger.debug(f"Exporting to CSV", "TRACKING_IO")
         # Create CSV content
         import csv
         with open(output_csv_path, 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)
             
-            # Header with time column
-            header = ['frame', 'time']
+            # Header without time column
+            header = ['frame']
             for bead in beads_data:
                 bead_id = bead['id']
                 header.extend([f'bead_{bead_id}_x', f'bead_{bead_id}_y'])
@@ -294,8 +277,7 @@ class TrackingDataIO:
             
             # Write data row by row
             for frame_idx in range(max_frames):
-                time = frame_idx / fps  # Calculate time in seconds
-                row: List[Any] = [frame_idx, f'{time:.6f}']
+                row: List[Any] = [frame_idx]
                 for bead in beads_data:
                     if frame_idx < len(bead['positions']):
                         x, y = bead['positions'][frame_idx]
