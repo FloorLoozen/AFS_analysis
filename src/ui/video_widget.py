@@ -188,7 +188,7 @@ class VideoWidget(QGroupBox):
             # Pass traces only if show_traces is True
             traces_to_show = self.bead_traces if self.show_traces else {}
             frame_data = FrameProcessor.draw_bead_overlays(
-                frame_data, self.bead_positions, traces_to_show, box_size=36, box_thickness=2
+                frame_data, self.bead_positions, traces_to_show, box_size=44, box_thickness=2
             )
         
         # Display the frame
@@ -273,20 +273,25 @@ class VideoWidget(QGroupBox):
         else:
             self.video_label.setCursor(Qt.ArrowCursor)  # type: ignore
     
-    def update_bead_positions(self, bead_positions: dict):
-        """Update bead positions for current frame."""
+    def update_bead_positions(self, bead_positions: dict, *, record_trace: bool = True):
+        """Update bead positions for current frame.
+
+        Args:
+            bead_positions: Mapping of bead_id to (x, y) coordinates
+            record_trace: When False, skip appending to trace history (used during scrubbing)
+        """
         self.bead_positions = bead_positions
-        
-        # Update trace history
-        for bead_id, (x, y) in bead_positions.items():
-            if bead_id not in self.bead_traces:
-                self.bead_traces[bead_id] = []
-            self.bead_traces[bead_id].append((x, y))
-            
-            # Keep last 100 points for performance
-            if len(self.bead_traces[bead_id]) > 100:
-                self.bead_traces[bead_id] = self.bead_traces[bead_id][-100:]
-        
+
+        if record_trace:
+            for bead_id, (x, y) in bead_positions.items():
+                if bead_id not in self.bead_traces:
+                    self.bead_traces[bead_id] = []
+                self.bead_traces[bead_id].append((x, y))
+
+                # Keep last 100 points for performance
+                if len(self.bead_traces[bead_id]) > 100:
+                    self.bead_traces[bead_id] = self.bead_traces[bead_id][-100:]
+
         # Trigger redraw if tracking is enabled
         if self.tracking_enabled and self.last_displayed_frame is not None:
             frame_index = self.controller.current_frame_index

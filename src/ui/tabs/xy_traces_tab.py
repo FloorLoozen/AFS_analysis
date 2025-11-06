@@ -30,6 +30,7 @@ class XYTracesTab(QWidget):
         self.is_paused = False
         self.is_selecting = False
         self.is_validating = False
+        self.is_adding_template = False
         self.next_bead_id = 0
         self.detected_positions = []
         self.current_hdf5_path = None
@@ -105,6 +106,13 @@ class XYTracesTab(QWidget):
         self.select_beads_button.setFixedWidth(70)
         self.select_beads_button.clicked.connect(self._on_select_beads_clicked)
         button_row1.addWidget(self.select_beads_button)
+
+        self.add_template_button = QPushButton("Add Template")
+        self.add_template_button.setEnabled(False)
+        self.add_template_button.setCheckable(True)
+        self.add_template_button.setFixedWidth(110)
+        self.add_template_button.toggled.connect(self._on_add_template_mode_toggled)
+        button_row1.addWidget(self.add_template_button)
         
         button_row1.addStretch()
         controls_layout.addLayout(button_row1)
@@ -200,10 +208,17 @@ class XYTracesTab(QWidget):
     
     def set_video_widget(self, video_widget):
         """Set reference to video widget."""
+        if self.video_widget:
+            try:
+                self.video_widget.controller.frame_changed.disconnect(self._on_video_frame_changed)  # type: ignore
+            except TypeError:
+                pass
+
         self.video_widget = video_widget
         if video_widget:
             video_widget.bead_clicked.connect(self._on_bead_clicked)
             video_widget.bead_right_clicked.connect(self._on_bead_right_clicked)
+            video_widget.controller.frame_changed.connect(self._on_video_frame_changed)  # type: ignore
     
     def on_video_loaded(self):
         """Called when a new video is loaded."""
@@ -248,7 +263,7 @@ class XYTracesTab(QWidget):
                 for bead in beads_data:
                     if frame_idx < len(bead['positions']):
                         bead_positions[bead['id']] = bead['positions'][frame_idx]
-                
+
                 self.video_widget.set_tracking_enabled(True)  # type: ignore
                 self.video_widget.update_bead_positions(bead_positions)  # type: ignore
             
@@ -262,6 +277,7 @@ class XYTracesTab(QWidget):
             self.clear_button.setEnabled(True)
             self.save_button.setEnabled(True)
             self.export_button.setEnabled(True)
+            self.add_template_button.setEnabled(True)
             
             # Check completeness
             num_tracked = len(beads_data[0]['positions']) if beads_data else 0
@@ -316,7 +332,11 @@ class XYTracesTab(QWidget):
         bead_positions = {}
         for x, y in self.detected_positions:
             bead_id = self.next_bead_id
-            self.tracker.add_bead(current_frame, x, y, bead_id)
+            try:
+                self.tracker.add_bead(current_frame, x, y, bead_id)
+            except ValueError as exc:
+                Logger.warning(f"Skipping bead at ({x}, {y}): {exc}", "XY_TAB")
+                continue
             bead_positions[bead_id] = (x, y)
             self.next_bead_id += 1
         
@@ -330,11 +350,15 @@ class XYTracesTab(QWidget):
         self.start_tracking_button.setEnabled(True)
         self.clear_button.setEnabled(True)
         self.show_traces_checkbox.setEnabled(True)
+        self.add_template_button.setEnabled(True)
         
         self._update_status(f"{len(self.detected_positions)} beads detected", "R-click remove, L-click add")
     
     def _on_select_beads_clicked(self):
         """Manual bead selection."""
+        if self.add_template_button.isChecked():
+            self.add_template_button.setChecked(False)
+
         if not self.is_selecting and not self.is_validating:
             # Start selection
             self.is_selecting = True
@@ -343,6 +367,7 @@ class XYTracesTab(QWidget):
             if self.video_widget:
                 self.video_widget.set_click_to_select_mode(True)  # type: ignore
                 self.video_widget.set_tracking_enabled(True)  # type: ignore
+            self.add_template_button.setEnabled(False)
             self._update_status("Manual selection mode", "Click beads to add")
         else:
             # End selection
@@ -355,10 +380,38 @@ class XYTracesTab(QWidget):
             if len(self.tracker.beads) > 0:
                 self.start_tracking_button.setEnabled(True)
                 self.clear_button.setEnabled(True)
+                self.add_template_button.setEnabled(True)
                 self._update_status(f"{len(self.tracker.beads)} beads selected", "Ready to track")
+
+    def _on_add_template_mode_toggled(self, checked: bool):
+        """Toggle focus template capture mode."""
+        if checked:
+            if self.is_selecting:
+                QMessageBox.information(self, "Finish Selection", "Finish manual selection before adding templates.")
+                self.add_template_button.setChecked(False)
+                return
+
+            if not self.tracker.beads:
+                QMessageBox.warning(self, "No Beads", "Add beads before capturing templates.")
+                self.add_template_button.setChecked(False)
+                return
+
+            self.is_adding_template = True
+            if self.video_widget:
+                self.video_widget.set_click_to_select_mode(True)  # type: ignore
+            bead_count = len(self.tracker.beads)
+            self._update_status(f"Template mode: {bead_count} beads", "Click bead focus appearance to store template")
+        else:
+            self.is_adding_template = False
+            if not self.is_selecting and not self.is_validating and self.video_widget:
+                self.video_widget.set_click_to_select_mode(False)  # type: ignore
     
     def _on_bead_clicked(self, x: int, y: int):
         """Add bead at clicked position."""
+        if self.is_adding_template:
+            self._add_template_from_click(x, y)
+            return
+
         if not self.is_selecting and not self.is_validating:
             return
         
@@ -369,8 +422,13 @@ class XYTracesTab(QWidget):
             return
         
         # Add bead
-        self.tracker.add_bead(current_frame, x, y, self.next_bead_id)
+        try:
+            self.tracker.add_bead(current_frame, x, y, self.next_bead_id)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Template Error", str(exc))
+            return
         self.next_bead_id += 1
+        self.add_template_button.setEnabled(True)
         
         # Update display
         bead_positions = {bead['id']: bead['positions'][0] for bead in self.tracker.beads}
@@ -380,6 +438,9 @@ class XYTracesTab(QWidget):
     
     def _on_bead_right_clicked(self, x: int, y: int):
         """Remove bead at clicked position."""
+        if self.is_adding_template:
+            return
+
         if not self.is_selecting and not self.is_validating:
             return
         
@@ -400,6 +461,48 @@ class XYTracesTab(QWidget):
                 self.video_widget.update_bead_positions(bead_positions)  # type: ignore
             
             self._update_status(f"{len(self.tracker.beads)} beads", "Bead removed")
+            if len(self.tracker.beads) == 0:
+                self.add_template_button.setChecked(False)
+                self.add_template_button.setEnabled(False)
+
+    def _add_template_from_click(self, x: int, y: int) -> None:
+        """Capture an additional template for the nearest bead."""
+        if not self.video_widget:
+            return
+
+        current_frame = self.video_widget.get_current_frame()
+        if current_frame is None:
+            return
+
+        bead = self._find_nearest_bead(x, y)
+        if bead is None:
+            self._update_status("Template mode", "Click closer to an existing bead")
+            return
+
+        bead_id = bead['id']
+        try:
+            self.tracker.add_focus_template(current_frame, bead_id, x, y)
+            template_count = len(bead.get('templates', []))
+            self._update_status(f"Template saved for bead {bead_id}", f"Stored templates: {template_count}")
+        except ValueError as exc:
+            QMessageBox.warning(self, "Template Error", str(exc))
+
+    def _find_nearest_bead(self, x: int, y: int, max_distance: float = 25.0):
+        """Return the bead closest to the provided coordinates within a threshold."""
+        nearest_bead = None
+        min_distance = float('inf')
+        for bead in self.tracker.beads:
+            bead_x, bead_y = bead['positions'][-1] if bead['positions'] else (None, None)
+            if bead_x is None or bead_y is None:
+                continue
+            distance = float(np.hypot(x - bead_x, y - bead_y))
+            if distance < min_distance:
+                min_distance = distance
+                nearest_bead = bead
+
+        if nearest_bead is not None and min_distance <= max_distance:
+            return nearest_bead
+        return None
     
     def _on_start_tracking_clicked(self):
         """Start or stop tracking."""
@@ -436,6 +539,8 @@ class XYTracesTab(QWidget):
         self.pause_button.setText("Pause")
         self.pause_button.setEnabled(True)
         self.select_beads_button.setEnabled(False)
+        self.add_template_button.setChecked(False)
+        self.add_template_button.setEnabled(False)
         
         # Show initial status with bead count
         self._update_status(f"Starting: {num_beads} beads", f"Frame 0/{self.total_tracking_frames}")
@@ -522,6 +627,8 @@ class XYTracesTab(QWidget):
         self.pause_button.setText("Pause")
         self.pause_button.setEnabled(False)
         self.select_beads_button.setEnabled(True)
+        if len(self.tracker.beads) > 0:
+            self.add_template_button.setEnabled(True)
     
     def _save_tracking_to_hdf5(self):
         """Save tracking data to HDF5."""
@@ -642,6 +749,29 @@ class XYTracesTab(QWidget):
         if self.video_widget.last_displayed_frame is not None:
             frame_index = self.video_widget.controller.current_frame_index
             self.video_widget._on_frame_changed(frame_index, self.video_widget.last_displayed_frame.copy())
+
+    def _on_video_frame_changed(self, frame_index: int, _frame_data):
+        """Refresh overlays when the video frame changes via scrubbing or playback."""
+        if self.is_tracking:
+            return
+
+        if not self.video_widget or not self.video_widget.tracking_enabled:
+            return
+
+        if not self.tracker.beads:
+            return
+
+        bead_positions = {}
+        for bead in self.tracker.beads:
+            positions = bead.get('positions', [])
+            if frame_index < len(positions):
+                bead_positions[bead['id']] = positions[frame_index]
+
+        # Update display without extending trace history
+        if bead_positions:
+            self.video_widget.update_bead_positions(bead_positions, record_trace=False)  # type: ignore
+        elif self.video_widget.bead_positions:
+            self.video_widget.update_bead_positions({}, record_trace=False)  # type: ignore
     
     def _reset_tracking(self):
         """Reset tracking state."""
@@ -666,4 +796,6 @@ class XYTracesTab(QWidget):
         self.show_traces_checkbox.setEnabled(False)
         self.export_button.setEnabled(False)
         self.save_button.setEnabled(False)
+        self.add_template_button.setChecked(False)
+        self.add_template_button.setEnabled(False)
         self._clear_status()

@@ -93,7 +93,11 @@ class FrameProcessor:
             return frame
         
         # Work on a copy to not modify original
-        frame_with_overlay = frame.copy()
+        if frame.ndim == 2:
+            # Promote grayscale to RGB so colored overlays stay visible
+            frame_with_overlay = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
+        else:
+            frame_with_overlay = frame.copy()
         half_size = box_size // 2
         
         # Color for overlays (green in RGB)
