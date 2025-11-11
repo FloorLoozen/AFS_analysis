@@ -2,11 +2,10 @@
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, 
-    QLabel, QMessageBox, QSpinBox, QGroupBox, QFormLayout, QCheckBox, QSizePolicy
+    QLabel, QMessageBox, QSpinBox, QGroupBox, QFormLayout, QCheckBox, QSizePolicy, QApplication
 )
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QPalette
-from PyQt5.QtWidgets import QApplication
 import numpy as np
 from pathlib import Path
 
@@ -30,7 +29,7 @@ class XYTracesTab(QWidget):
         app = QApplication.instance()
         if app is not None:
             pal = self.palette()
-            pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
+            pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))  # type: ignore
             self.setPalette(pal)
             self.setAutoFillBackground(True)
         self.video_widget: Optional['VideoWidget'] = None
@@ -101,14 +100,14 @@ class XYTracesTab(QWidget):
         controls_layout.setSpacing(8)
         # Align controls to the left and use modest inner margins so buttons sit inside the frame
         controls_layout.setContentsMargins(6, 8, 6, 6)
-        controls_layout.setAlignment(Qt.AlignLeft)
+        controls_layout.setAlignment(Qt.AlignLeft)  # type: ignore
 
         # Use a grid layout so columns line up vertically across the two rows
         grid = QGridLayout()
         grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(8)
         grid.setContentsMargins(0, 0, 0, 0)
-        grid.setAlignment(Qt.AlignLeft)
+        grid.setAlignment(Qt.AlignLeft)  # type: ignore
 
         # Row 1 order: Auto Detect, Add (Manual), Load Saved
         self.auto_detect_button = QPushButton("Auto Detect")
@@ -205,13 +204,13 @@ class XYTracesTab(QWidget):
         if label_w > self._status_label_width:
             self._status_label_width = label_w
         label.setFixedWidth(self._status_label_width)
-        label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)  # type: ignore
         
         # Value
         value = QLabel(value_text)
         value.setWordWrap(True)
         value.setStyleSheet("color: #222;")
-        value.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        value.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)  # type: ignore
         
         # Add to form layout
         self.status_layout.addRow(label, value)

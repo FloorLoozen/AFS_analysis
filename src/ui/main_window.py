@@ -4,7 +4,6 @@ from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QAction, 
     QMessageBox, QSizePolicy
 )
-from PyQt5.QtCore import Qt
 
 
 class MainWindow(QMainWindow):
@@ -33,40 +32,40 @@ class MainWindow(QMainWindow):
         # Create central layout
         self._create_central_layout()
         
-        self.statusBar().showMessage("Ready")
+        self.statusBar().showMessage("Ready")  # type: ignore
 
     def _create_menu_bar(self):
         """Create the application menu bar."""
         menubar = self.menuBar()
 
         # File menu
-        file_menu = menubar.addMenu("File")
+        file_menu = menubar.addMenu("File")  # type: ignore
         
         open_action = QAction("Open Video...", self)
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self._open_video)
-        file_menu.addAction(open_action)
+        file_menu.addAction(open_action)  # type: ignore
         
-        file_menu.addSeparator()
+        file_menu.addSeparator()  # type: ignore
         
         toggle_action = QAction("Toggle Maximize", self)
         toggle_action.setShortcut("F11")
         toggle_action.triggered.connect(self._toggle_fullscreen)
-        file_menu.addAction(toggle_action)
+        file_menu.addAction(toggle_action)  # type: ignore
         
-        file_menu.addSeparator()
+        file_menu.addSeparator()  # type: ignore
         
         exit_action = QAction("Exit", self)
         exit_action.setShortcut("Ctrl+Q")
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
+        exit_action.triggered.connect(self.close)  # type: ignore
+        file_menu.addAction(exit_action)  # type: ignore
 
         # Help menu
-        help_menu = menubar.addMenu("Help")
+        help_menu = menubar.addMenu("Help")  # type: ignore
         
         about_action = QAction("About", self)
         about_action.triggered.connect(self._show_about)
-        help_menu.addAction(about_action)
+        help_menu.addAction(about_action)  # type: ignore
 
     def _create_central_layout(self):
         """Create main layout: left column (video only) + right column (analysis tabs)."""
@@ -123,7 +122,7 @@ class MainWindow(QMainWindow):
             "Video analysis tool for Atomic Force Spectroscopy data."
         )
 
-    def closeEvent(self, event):
+    def closeEvent(self, event):  # type: ignore
         """Handle window close event."""
         reply = QMessageBox.question(
             self,

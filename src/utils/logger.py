@@ -24,6 +24,12 @@ class Logger:
         print(f"{prefix} {message}")
     
     @staticmethod
+    def warning(message: str, module: Optional[str] = None):
+        """Log warning message."""
+        prefix = f"[{module}]" if module else "[WARNING]"
+        print(f"⚠ {prefix} {message}", file=sys.stderr)
+    
+    @staticmethod
     def error(message: str, module: Optional[str] = None):
         """Log error message."""
         prefix = f"[{module}]" if module else "[ERROR]"

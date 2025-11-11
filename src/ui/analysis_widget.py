@@ -3,7 +3,6 @@
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QTabWidget, QApplication
 )
-from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPalette
 
 
@@ -24,7 +23,7 @@ class AnalysisWidget(QWidget):
         for i in range(self.tab_widget.count()):
             tab = self.tab_widget.widget(i)
             if hasattr(tab, 'set_video_widget'):
-                tab.set_video_widget(video_widget)
+                tab.set_video_widget(video_widget)  # type: ignore
     
     def _init_ui(self):
         """Initialize the user interface."""
@@ -37,7 +36,7 @@ class AnalysisWidget(QWidget):
         app = QApplication.instance()
         if app is not None:
             pal = self.tab_widget.palette()
-            pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
+            pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))  # type: ignore
             self.tab_widget.setPalette(pal)
             self.tab_widget.setAutoFillBackground(True)
         
@@ -66,4 +65,4 @@ class AnalysisWidget(QWidget):
         for i in range(self.tab_widget.count()):
             tab = self.tab_widget.widget(i)
             if hasattr(tab, 'on_video_loaded'):
-                tab.on_video_loaded()
+                tab.on_video_loaded()  # type: ignore

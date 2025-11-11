@@ -1,11 +1,10 @@
 """Info tab for displaying measurement metadata and GPU information."""
 
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QGroupBox, QFormLayout, QScrollArea
+    QWidget, QVBoxLayout, QLabel, QGroupBox, QFormLayout, QScrollArea, QApplication
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPalette
-from PyQt5.QtWidgets import QApplication
 from datetime import datetime
 import os
 from src.utils.gpu_config import get_gpu_info
@@ -21,7 +20,7 @@ class InfoTab(QWidget):
         app = QApplication.instance()
         if app is not None:
             pal = self.palette()
-            pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
+            pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))  # type: ignore
             self.setPalette(pal)
             self.setAutoFillBackground(True)
         self.video_widget = None
@@ -59,7 +58,7 @@ class InfoTab(QWidget):
         self.system_layout.setContentsMargins(8, 8, 8, 8)
         self.system_layout.setSpacing(5)
         self.system_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        self.system_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        self.system_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)  # type: ignore
         layout.addWidget(system_group)
         
         # Populate GPU info immediately
@@ -71,7 +70,7 @@ class InfoTab(QWidget):
         self.measurement_layout.setContentsMargins(8, 8, 8, 8)
         self.measurement_layout.setSpacing(5)
         self.measurement_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        self.measurement_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        self.measurement_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)  # type: ignore
         layout.addWidget(measurement_group)
         
         # Video Info Section
@@ -80,7 +79,7 @@ class InfoTab(QWidget):
         self.video_layout.setContentsMargins(8, 8, 8, 8)
         self.video_layout.setSpacing(5)
         self.video_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        self.video_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        self.video_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)  # type: ignore
         layout.addWidget(video_group)
         
         # File Info Section
@@ -89,7 +88,7 @@ class InfoTab(QWidget):
         self.file_layout.setContentsMargins(8, 8, 8, 8)
         self.file_layout.setSpacing(5)
         self.file_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        self.file_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        self.file_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)  # type: ignore
         layout.addWidget(file_group)
         
         # Additional Metadata Section (for all other HDF5 attributes)
@@ -98,7 +97,7 @@ class InfoTab(QWidget):
         self.metadata_layout.setContentsMargins(8, 8, 8, 8)
         self.metadata_layout.setSpacing(5)
         self.metadata_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        self.metadata_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
+        self.metadata_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)  # type: ignore
         layout.addWidget(metadata_group)
         
         layout.addStretch()
@@ -113,7 +112,7 @@ class InfoTab(QWidget):
         label = QLabel(label_text)
         label.setStyleSheet("color: #666;")
         # Left-align label text; we'll compute a consistent column width after rows are added
-        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)  # type: ignore
         # Update maximum label width seen so far (use font metrics)
         fm = label.fontMetrics()
         w = fm.boundingRect(label_text).width() + 8
@@ -124,7 +123,7 @@ class InfoTab(QWidget):
         value = QLabel(value_text)
         value.setWordWrap(True)
         value.setStyleSheet("color: #222;")
-        value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        value.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)  # type: ignore
         
         # Add to form layout
         layout.addRow(label, value)
@@ -261,7 +260,7 @@ class InfoTab(QWidget):
         if 'frame_shape' in metadata:
             shape = metadata['frame_shape']
             if isinstance(shape, (list, tuple)) and len(shape) >= 2:
-                self._add_info_row(self.video_layout, "Resolution (px):", f"{shape[1]} × {shape[0]}")
+                self._add_info_row(self.video_layout, "Resolution:", f"{shape[1]} × {shape[0]} px")
             displayed_keys.add('frame_shape')
         
         # Frame count
@@ -269,27 +268,29 @@ class InfoTab(QWidget):
             self._add_info_row(self.video_layout, "Total Frames:", f"{metadata['total_frames']:,}")
             displayed_keys.add('total_frames')
         
-        # FPS
+        # FPS - show actual if available, otherwise target
         fps = None
         if 'actual_fps' in metadata:
             fps = metadata['actual_fps']
-            self._add_info_row(self.video_layout, "Actual FPS (fps):", f"{fps:.3f}")
+            self._add_info_row(self.video_layout, "Frame Rate (fps):", f"{fps:.2f}")
             displayed_keys.add('actual_fps')
-        
-        if 'fps' in metadata:
-            target_fps = metadata['fps']
-            self._add_info_row(self.video_layout, "Target FPS (fps):", f"{target_fps:.3f}")
+            displayed_keys.add('fps')  # Don't show target if we have actual
+        elif 'fps' in metadata:
+            fps = metadata['fps']
+            self._add_info_row(self.video_layout, "Frame Rate (fps):", f"{fps:.2f}")
             displayed_keys.add('fps')
-            if fps is None:
-                fps = target_fps
         
         # Duration
         if fps and fps > 0 and 'total_frames' in metadata:
             duration_sec = metadata['total_frames'] / fps
-            minutes = int(duration_sec // 60)
+            hours = int(duration_sec // 3600)
+            minutes = int((duration_sec % 3600) // 60)
             seconds = duration_sec % 60
-            duration_str = f"{minutes}:{seconds:05.2f}"
-            self._add_info_row(self.video_layout, "Duration:", duration_str)
+            if hours > 0:
+                duration_str = f"{hours}:{minutes:02d}:{seconds:05.2f}"
+            else:
+                duration_str = f"{minutes}:{seconds:05.2f}"
+            self._add_info_row(self.video_layout, "Duration (h:mm:ss):", duration_str)
         
         # Data type
         if 'dtype' in metadata:
@@ -332,11 +333,10 @@ class InfoTab(QWidget):
                 file_size = os.path.getsize(file_path)
                 size_mb = file_size / (1024 * 1024)
                 if size_mb > 1024:
-                    size_str = f"{size_mb / 1024:.2f}"
-                    self._add_info_row(self.file_layout, "File Size (GB):", size_str)
+                    size_gb = size_mb / 1024
+                    self._add_info_row(self.file_layout, "File Size (GB):", f"{size_gb:.2f}")
                 else:
-                    size_str = f"{size_mb:.2f}"
-                    self._add_info_row(self.file_layout, "File Size (MB):", size_str)
+                    self._add_info_row(self.file_layout, "File Size (MB):", f"{size_mb:.2f}")
                 
                 # Calculate uncompressed size estimate
                 if 'total_frames' in metadata and 'frame_shape' in metadata and 'dtype' in metadata:
@@ -355,20 +355,9 @@ class InfoTab(QWidget):
                         uncompressed_size = total_pixels * bytes_per_pixel
                         uncompressed_mb = uncompressed_size / (1024 * 1024)
                         
-                        if uncompressed_mb > 1024:
-                            uncompressed_str = f"{uncompressed_mb / 1024:.2f}"
-                            self._add_info_row(self.file_layout, "Uncompressed (GB):", uncompressed_str)
-                        else:
-                            uncompressed_str = f"{uncompressed_mb:.2f}"
-                            self._add_info_row(self.file_layout, "Uncompressed (MB):", uncompressed_str)
-                        
                         # Compression ratio
                         compression_ratio = uncompressed_size / file_size
-                        self._add_info_row(self.file_layout, "Compression Ratio:", f"{compression_ratio:.2f}×")
-                        
-                        # Space saved
-                        space_saved = (1 - file_size / uncompressed_size) * 100
-                        self._add_info_row(self.file_layout, "Space Saved (%):", f"{space_saved:.1f}")
+                        self._add_info_row(self.file_layout, "Compression Ratio:", f"{compression_ratio:.1f}×")
             except Exception:
                 pass
         
@@ -378,42 +367,124 @@ class InfoTab(QWidget):
             displayed_keys.add('format_version')
         
         # === ADDITIONAL METADATA ===
-        # Display all remaining metadata that hasn't been shown yet
-        additional_keys = sorted([k for k in metadata.keys() if k not in displayed_keys])
+        # Skip only truly redundant/duplicate data
+        skip_keys = {
+            # Duplicates of data already shown above
+            'actual_fps',  # Already shown as Frame Rate
+            'fps',  # Already shown as Frame Rate
+            'frame_shape',  # Already shown as Resolution
+            'total_frames',  # Already shown as Total Frames
+            'dtype',  # Already shown as Data Type
+            'color_format',  # Already shown as Color Format
+            'compression',  # Already shown as Compression
+            'compression_opts',  # Already shown as Compression Level
+            'file_path',  # Already shown as Path
+            'format_version',  # Already shown as Format Version
+            'user_sample_name',  # Already shown as Sample
+            'user_operator',  # Already shown as Operator
+            'user_system_name',  # Already shown as System
+            'created_at',  # Already shown as Recorded
+            'timestamp',  # Already shown as Recorded
+            'description',  # Already shown as Description
+            # True duplicates - same data with different names
+            'original_frame_shape',  # Duplicate of frame_shape
+            'frame_size',  # Calculated from frame_shape
+            'user_save_path',  # Duplicate of file_path
+        }
+        
+        # Sort additional metadata in logical order by category
+        def metadata_sort_key(key):
+            # Define logical ordering by category
+            processing_terms = ['gpu', 'chunk', 'downscale', 'post_compressed', 'post_processed', 
+                              'quality_reduction', 'original_compression', 'post_compression']
+            timing_terms = ['timestamp', 'started', 'finished', 'processing_time', 'avg', 'fps_efficiency']
+            stats_terms = ['min', 'max', 'mean', 'median', 'std']
+            system_terms = ['system', 'platform', 'version', 'processor']
+            
+            key_lower = key.lower()
+            
+            # Category priority: processing -> timing -> stats -> system -> other
+            if any(term in key_lower for term in processing_terms):
+                return (0, key)
+            elif any(term in key_lower for term in timing_terms):
+                return (1, key)
+            elif any(term in key_lower for term in stats_terms):
+                return (2, key)
+            elif any(term in key_lower for term in system_terms):
+                return (3, key)
+            else:
+                return (4, key)
+        
+        additional_keys = sorted(
+            [k for k in metadata.keys() if k not in displayed_keys and k not in skip_keys],
+            key=metadata_sort_key
+        )
         
         for key in additional_keys:
             value = metadata[key]
             
-            # Format the key nicely and extract units
+            # Format the key nicely
             display_key = key.replace('_', ' ').title()
             
-            # Detect and move units to brackets
-            unit_mappings = {
-                'Fps': '(fps)',
-                'Mb': '(MB)',
-                'Gb': '(GB)',
-                'Bytes': '(bytes)',
-                'S': '(s)',  # seconds
-                'Ms': '(ms)',  # milliseconds
+            # Special handling for specific field names that need units
+            key_lower = key.lower()
+            
+            # Check if display_key already ends with a unit suffix that needs to be converted
+            unit_conversions = {
+                ' Fps': ' (fps)',
+                ' Mb': ' (MB)',
+                ' Gb': ' (GB)',
+                ' Bytes': ' (bytes)',
+                ' S': ' (s)',
+                ' Ms': ' (ms)',
             }
             
-            # Check if key ends with a unit indicator
-            for unit_suffix, bracket_unit in unit_mappings.items():
-                if display_key.endswith(f' {unit_suffix}'):
-                    # Remove unit from key and add to brackets
-                    display_key = display_key[:-len(unit_suffix)-1].strip() + f' {bracket_unit}:'
+            converted = False
+            for suffix, bracket_unit in unit_conversions.items():
+                if display_key.endswith(suffix):
+                    display_key = display_key[:-len(suffix)] + bracket_unit + ':'
+                    converted = True
                     break
-            else:
-                # No unit found, just add colon
-                display_key = display_key + ':'
+            
+            if not converted:
+                # Add units for fields that don't have them in the name
+                if 'avg_downscale_time' in key_lower or 'processing_time' in key_lower:
+                    display_key = display_key + ' (ms):'
+                elif key_lower == 'min':
+                    display_key = 'Min Pixel Intensity:'  # Clarify it's pixel values
+                elif key_lower == 'max':
+                    display_key = 'Max Pixel Intensity:'  # Clarify it's pixel values
+                elif 'frame_size' in key_lower:
+                    display_key = display_key + ' (bytes):'
+                elif 'total_data' in key_lower and 'mb' not in key_lower:
+                    display_key = display_key + ' (MB):'
+                elif 'recording_duration' in key_lower and 's' not in key_lower:
+                    display_key = display_key + ' (s):'
+                elif 'fps_efficiency' in key_lower:
+                    display_key = display_key + ' (%):'
+                elif 'chunk_size' in key_lower:
+                    display_key = 'Chunk Size:'  # No unit - it's dimensions
+                elif 'downscale_factor' in key_lower:
+                    display_key = 'Downscale Factor:'  # No unit - it's a ratio
+                elif 'compression_level' in key_lower:
+                    display_key = display_key + ':'  # No unit - it's a level (0-9)
+                elif 'timestamp' in key_lower or 'finished_at' in key_lower:
+                    display_key = display_key + ':'  # Timestamps don't need units
+                elif 'gpu_frames_processed' in key_lower:
+                    display_key = 'GPU Frames Processed:'  # No unit - it's a count
+                else:
+                    display_key = display_key + ':'
             
             # Format the value appropriately
             if isinstance(value, (list, tuple)):
-                # For lists/tuples, show as comma-separated
+                # For lists/tuples, format nicely
                 if len(value) > 10:
                     display_value = f"[{len(value)} items]"
+                elif len(value) <= 3:
+                    # For small tuples (like chunk_size), show with × separator
+                    display_value = " × ".join(str(v) for v in value)
                 else:
-                    display_value = str(value)
+                    display_value = ", ".join(str(v) for v in value)
             elif isinstance(value, bytes):
                 # For bytes, show as hex or length
                 if len(value) < 100:
@@ -427,7 +498,18 @@ class InfoTab(QWidget):
                 else:
                     display_value = f"{value:,}"
             else:
+                # Convert to string and clean up any brackets or array notation
                 display_value = str(value)
+                # If it looks like an array/list string, try to clean it up
+                if display_value.startswith('[') and display_value.endswith(']'):
+                    # Remove brackets and split
+                    clean_str = display_value[1:-1].strip()
+                    # Check if it's space-separated numbers (like "1 1024 1296")
+                    parts = clean_str.split()
+                    if len(parts) <= 3 and all(p.replace('.', '').replace('-', '').isdigit() for p in parts):
+                        display_value = " × ".join(parts)
+                    else:
+                        display_value = clean_str
             
             # Truncate very long values
             if len(display_value) > 200:
