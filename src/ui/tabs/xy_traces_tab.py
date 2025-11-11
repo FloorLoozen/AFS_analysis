@@ -5,6 +5,8 @@ from PyQt5.QtWidgets import (
     QLabel, QMessageBox, QSpinBox, QGroupBox, QFormLayout, QCheckBox, QSizePolicy
 )
 from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import QPalette
+from PyQt5.QtWidgets import QApplication
 import numpy as np
 from pathlib import Path
 
@@ -24,6 +26,13 @@ class XYTracesTab(QWidget):
     def __init__(self):
         """Initialize XY traces tab."""
         super().__init__()
+        # Ensure this tab uses the application's Window palette color so it matches other tabs
+        app = QApplication.instance()
+        if app is not None:
+            pal = self.palette()
+            pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
+            self.setPalette(pal)
+            self.setAutoFillBackground(True)
         self.video_widget: Optional['VideoWidget'] = None
         self.tracker = BeadTracker(window_size=40)
         self.is_tracking = False

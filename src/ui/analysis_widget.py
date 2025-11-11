@@ -1,9 +1,10 @@
 """Analysis controls widget for AFS Analysis."""
 
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QTabWidget
+    QWidget, QVBoxLayout, QTabWidget, QApplication
 )
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QPalette
 
 
 class AnalysisWidget(QWidget):
@@ -32,6 +33,13 @@ class AnalysisWidget(QWidget):
         
         # Create tabbed interface
         self.tab_widget = QTabWidget()
+        # Ensure the tab pane uses the application's window palette so all tabs match
+        app = QApplication.instance()
+        if app is not None:
+            pal = self.tab_widget.palette()
+            pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
+            self.tab_widget.setPalette(pal)
+            self.tab_widget.setAutoFillBackground(True)
         
         # Import and add tabs
         self._add_tabs()

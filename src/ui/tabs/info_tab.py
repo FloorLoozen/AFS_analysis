@@ -4,6 +4,8 @@ from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QGroupBox, QFormLayout, QScrollArea
 )
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QPalette
+from PyQt5.QtWidgets import QApplication
 from datetime import datetime
 import os
 from src.utils.gpu_config import get_gpu_info
@@ -15,6 +17,13 @@ class InfoTab(QWidget):
     def __init__(self):
         """Initialize info tab."""
         super().__init__()
+        # Ensure this tab uses the application's Window palette color so it matches other tabs
+        app = QApplication.instance()
+        if app is not None:
+            pal = self.palette()
+            pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
+            self.setPalette(pal)
+            self.setAutoFillBackground(True)
         self.video_widget = None
         # Track maximum label width across info sections so we can align columns
         self._max_info_label_width = 0
