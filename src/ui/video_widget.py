@@ -1,6 +1,6 @@
 """Video player widget for AFS Analysis."""
 
-from typing import Optional
+from typing import Optional, Dict, List, Tuple
 from PyQt5.QtWidgets import (
     QGroupBox, QVBoxLayout, QHBoxLayout, QPushButton,
     QSlider, QLabel, QFileDialog, QFrame, QSizePolicy
@@ -273,24 +273,32 @@ class VideoWidget(QGroupBox):
         else:
             self.video_label.setCursor(Qt.ArrowCursor)  # type: ignore
     
-    def update_bead_positions(self, bead_positions: dict, *, record_trace: bool = True):
+    def update_bead_positions(
+        self,
+        bead_positions: dict,
+        *,
+        record_trace: bool = True,
+        traces_override: Optional[Dict[int, List[Tuple[int, int]]]] = None
+    ):
         """Update bead positions for current frame.
 
         Args:
             bead_positions: Mapping of bead_id to (x, y) coordinates
             record_trace: When False, skip appending to trace history (used during scrubbing)
+            traces_override: Optional trace history to display instead of internal buffer
         """
         self.bead_positions = bead_positions
 
-        if record_trace:
-            for bead_id, (x, y) in bead_positions.items():
-                if bead_id not in self.bead_traces:
-                    self.bead_traces[bead_id] = []
-                self.bead_traces[bead_id].append((x, y))
-
-                # Keep last 100 points for performance
-                if len(self.bead_traces[bead_id]) > 100:
-                    self.bead_traces[bead_id] = self.bead_traces[bead_id][-100:]
+        if traces_override is not None:
+            self.bead_traces = traces_override
+        elif record_trace:
+            if not bead_positions:
+                self.bead_traces = {}
+            else:
+                for bead_id, (x, y) in bead_positions.items():
+                    if bead_id not in self.bead_traces:
+                        self.bead_traces[bead_id] = []
+                    self.bead_traces[bead_id].append((x, y))
 
         # Trigger redraw if tracking is enabled
         if self.tracking_enabled and self.last_displayed_frame is not None:

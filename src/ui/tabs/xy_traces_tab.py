@@ -13,7 +13,7 @@ from src.utils.tracking_io import TrackingDataIO
 from src.utils.logger import Logger
 
 # Import TYPE_CHECKING to avoid circular imports
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Dict, List, Tuple
 if TYPE_CHECKING:
     from src.ui.video_widget import VideoWidget
 
@@ -264,8 +264,14 @@ class XYTracesTab(QWidget):
                     if frame_idx < len(bead['positions']):
                         bead_positions[bead['id']] = bead['positions'][frame_idx]
 
+                trace_history = self._build_trace_history(frame_idx)
+
                 self.video_widget.set_tracking_enabled(True)  # type: ignore
-                self.video_widget.update_bead_positions(bead_positions)  # type: ignore
+                self.video_widget.update_bead_positions(  # type: ignore
+                    bead_positions,
+                    record_trace=False,
+                    traces_override=trace_history
+                )
             
             # Update UI
             self.is_validating = True
@@ -750,6 +756,20 @@ class XYTracesTab(QWidget):
             frame_index = self.video_widget.controller.current_frame_index
             self.video_widget._on_frame_changed(frame_index, self.video_widget.last_displayed_frame.copy())
 
+    def _build_trace_history(self, frame_index: int) -> Dict[int, List[Tuple[int, int]]]:
+        """Return bead traces up to the provided frame index."""
+        traces: Dict[int, List[Tuple[int, int]]] = {}
+        for bead in self.tracker.beads:
+            positions = bead.get('positions', [])
+            if not positions:
+                continue
+
+            cutoff = min(frame_index + 1, len(positions))
+            if cutoff > 0:
+                traces[bead['id']] = positions[:cutoff]
+
+        return traces
+
     def _on_video_frame_changed(self, frame_index: int, _frame_data):
         """Refresh overlays when the video frame changes via scrubbing or playback."""
         if self.is_tracking:
@@ -767,11 +787,20 @@ class XYTracesTab(QWidget):
             if frame_index < len(positions):
                 bead_positions[bead['id']] = positions[frame_index]
 
+        trace_history = self._build_trace_history(frame_index)
+
+        if not bead_positions and trace_history:
+            bead_positions = {bead_id: trace[-1] for bead_id, trace in trace_history.items() if trace}
+
         # Update display without extending trace history
-        if bead_positions:
-            self.video_widget.update_bead_positions(bead_positions, record_trace=False)  # type: ignore
+        if bead_positions or trace_history:
+            self.video_widget.update_bead_positions(  # type: ignore
+                bead_positions,
+                record_trace=False,
+                traces_override=trace_history
+            )
         elif self.video_widget.bead_positions:
-            self.video_widget.update_bead_positions({}, record_trace=False)  # type: ignore
+            self.video_widget.update_bead_positions({}, record_trace=False, traces_override={})  # type: ignore
     
     def _reset_tracking(self):
         """Reset tracking state."""
