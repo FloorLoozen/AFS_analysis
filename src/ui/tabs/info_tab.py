@@ -16,6 +16,8 @@ class InfoTab(QWidget):
         """Initialize info tab."""
         super().__init__()
         self.video_widget = None
+        # Track maximum label width across info sections so we can align columns
+        self._max_info_label_width = 0
         self._init_ui()
     
     def set_video_widget(self, video_widget):
@@ -100,9 +102,14 @@ class InfoTab(QWidget):
         """Add a label-value row to a form layout."""
         # Label with fixed width for perfect alignment
         label = QLabel(label_text)
-        label.setFixedWidth(160)  # Fixed width ensures perfect alignment
         label.setStyleSheet("color: #666;")
-        label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        # Left-align label text; we'll compute a consistent column width after rows are added
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        # Update maximum label width seen so far (use font metrics)
+        fm = label.fontMetrics()
+        w = fm.boundingRect(label_text).width() + 8
+        if w > self._max_info_label_width:
+            self._max_info_label_width = w
         
         # Value
         value = QLabel(value_text)
@@ -114,6 +121,26 @@ class InfoTab(QWidget):
         layout.addRow(label, value)
         
         return value
+
+    def _apply_label_widths(self):
+        """Apply the computed maximum label width to all label widgets in the info layouts.
+
+        This ensures all label columns align to the same left edge based on the longest label.
+        """
+        if self._max_info_label_width <= 0:
+            return
+
+        target_w = self._max_info_label_width
+        for layout in (self.system_layout, self.measurement_layout, self.video_layout, self.file_layout, self.metadata_layout):
+            # Iterate over items and set label widths for those ending with ':' which are the labels
+            for i in range(layout.count()):
+                item = layout.itemAt(i)
+                if item is None:
+                    continue
+                w = item.widget()
+                if isinstance(w, QLabel) and w.text().strip().endswith(':'):
+                    w.setFixedWidth(target_w)
+                    w.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
     
     def _clear_layout(self, layout):
         """Clear all rows from a form layout."""
@@ -398,3 +425,6 @@ class InfoTab(QWidget):
                 display_value = display_value[:197] + "..."
             
             self._add_info_row(self.metadata_layout, display_key, display_value)
+
+        # After populating all sections, apply a uniform label column width based on the longest label
+        self._apply_label_widths()

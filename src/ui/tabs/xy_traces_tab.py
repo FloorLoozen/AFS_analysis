@@ -1,8 +1,8 @@
 """XY Traces tab for bead tracking with HDF5 integration."""
 
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
-    QLabel, QMessageBox, QFileDialog, QSpinBox, QGroupBox, QFormLayout, QCheckBox
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, 
+    QLabel, QMessageBox, QSpinBox, QGroupBox, QFormLayout, QCheckBox, QSizePolicy
 )
 from PyQt5.QtCore import Qt, QTimer
 import numpy as np
@@ -30,7 +30,7 @@ class XYTracesTab(QWidget):
         self.is_paused = False
         self.is_selecting = False
         self.is_validating = False
-        self.is_adding_template = False
+        # template feature removed
         self.next_bead_id = 0
         self.detected_positions = []
         self.current_hdf5_path = None
@@ -45,6 +45,8 @@ class XYTracesTab(QWidget):
         self.frames_per_batch = 5  # Process 5 frames at a time for better performance
         
         self._init_ui()
+        # Track maximum label width for status rows so we can align values consistently
+        self._status_label_width = 0
     
     def _init_ui(self):
         """Initialize the user interface matching AFS_acquisition style."""
@@ -57,7 +59,9 @@ class XYTracesTab(QWidget):
         settings_layout = QFormLayout()
         settings_layout.setRowWrapPolicy(QFormLayout.DontWrapRows)  # type: ignore
         settings_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)  # type: ignore
-        settings_layout.setLabelAlignment(Qt.AlignRight)  # type: ignore
+        # Left-align labels and fields so text and inputs sit flush to the left
+        settings_layout.setLabelAlignment(Qt.AlignLeft)  # type: ignore
+        settings_layout.setFormAlignment(Qt.AlignLeft)  # type: ignore
         
         self.threshold_spinbox = QSpinBox()
         self.threshold_spinbox.setRange(50, 255)
@@ -82,83 +86,90 @@ class XYTracesTab(QWidget):
         
         # Control buttons group
         controls_group = QGroupBox("Tracking Controls")
+        # Use modest internal margins so widgets sit clearly inside the group box
+        controls_group.setContentsMargins(8, 20, 8, 8)
         controls_layout = QVBoxLayout()
         controls_layout.setSpacing(8)
-        
-        # Row 1: Detection buttons
-        button_row1 = QHBoxLayout()
-        button_row1.setSpacing(8)
-        
-        self.load_tracking_button = QPushButton("Load Saved")
-        self.load_tracking_button.setEnabled(False)
-        self.load_tracking_button.setFixedWidth(80)
-        self.load_tracking_button.clicked.connect(self._on_load_tracking_clicked)
-        button_row1.addWidget(self.load_tracking_button)
-        
+        # Align controls to the left and use modest inner margins so buttons sit inside the frame
+        controls_layout.setContentsMargins(6, 8, 6, 6)
+        controls_layout.setAlignment(Qt.AlignLeft)
+
+        # Use a grid layout so columns line up vertically across the two rows
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(8)
+        grid.setVerticalSpacing(8)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setAlignment(Qt.AlignLeft)
+
+        # Row 1 order: Auto Detect, Add (Manual), Load Saved
         self.auto_detect_button = QPushButton("Auto Detect")
         self.auto_detect_button.setEnabled(False)
-        self.auto_detect_button.setFixedWidth(90)
+        self.auto_detect_button.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        self.auto_detect_button.setFixedHeight(30)
         self.auto_detect_button.clicked.connect(self._on_auto_detect_clicked)
-        button_row1.addWidget(self.auto_detect_button)
-        
-        self.select_beads_button = QPushButton("Manual")
-        self.select_beads_button.setEnabled(False)
-        self.select_beads_button.setFixedWidth(70)
-        self.select_beads_button.clicked.connect(self._on_select_beads_clicked)
-        button_row1.addWidget(self.select_beads_button)
 
-        self.add_template_button = QPushButton("Add Template")
-        self.add_template_button.setEnabled(False)
-        self.add_template_button.setCheckable(True)
-        self.add_template_button.setFixedWidth(110)
-        self.add_template_button.toggled.connect(self._on_add_template_mode_toggled)
-        button_row1.addWidget(self.add_template_button)
-        
-        button_row1.addStretch()
-        controls_layout.addLayout(button_row1)
-        
-        # Row 2: Action buttons
-        button_row2 = QHBoxLayout()
-        button_row2.setSpacing(8)
-        
+        self.select_beads_button = QPushButton("Add")
+        self.select_beads_button.setEnabled(False)
+        self.select_beads_button.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        self.select_beads_button.setFixedHeight(30)
+        self.select_beads_button.clicked.connect(self._on_select_beads_clicked)
+
+        self.load_tracking_button = QPushButton("Load Saved")
+        self.load_tracking_button.setEnabled(False)
+        self.load_tracking_button.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        self.load_tracking_button.setFixedHeight(30)
+        self.load_tracking_button.clicked.connect(self._on_load_tracking_clicked)
+
+        # Row 2: Start Tracking, Pause, Clear
         self.start_tracking_button = QPushButton("Start Tracking")
         self.start_tracking_button.setEnabled(False)
-        self.start_tracking_button.setFixedWidth(100)
+        self.start_tracking_button.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        self.start_tracking_button.setFixedHeight(30)
         self.start_tracking_button.clicked.connect(self._on_start_tracking_clicked)
-        button_row2.addWidget(self.start_tracking_button)
-        
+
         self.pause_button = QPushButton("Pause")
         self.pause_button.setEnabled(False)
-        self.pause_button.setFixedWidth(60)
+        self.pause_button.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        self.pause_button.setFixedHeight(30)
         self.pause_button.clicked.connect(self._on_pause_tracking_clicked)
-        button_row2.addWidget(self.pause_button)
-        
-        self.save_button = QPushButton("Save")
-        self.save_button.setEnabled(False)
-        self.save_button.setFixedWidth(60)
-        self.save_button.clicked.connect(self._on_save_to_hdf5_clicked)
-        button_row2.addWidget(self.save_button)
-        
-        self.export_button = QPushButton("Export CSV")
-        self.export_button.setEnabled(False)
-        self.export_button.setFixedWidth(80)
-        self.export_button.clicked.connect(self._on_export_clicked)
-        button_row2.addWidget(self.export_button)
-        
+
         self.clear_button = QPushButton("Clear")
         self.clear_button.setEnabled(False)
-        self.clear_button.setFixedWidth(60)
+        self.clear_button.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        self.clear_button.setFixedHeight(30)
         self.clear_button.clicked.connect(self._on_clear_clicked)
-        button_row2.addWidget(self.clear_button)
-        
+
+        # Keep checkbox compact so it doesn't stretch with the buttons
         self.show_traces_checkbox = QCheckBox("Show Traces")
         self.show_traces_checkbox.setEnabled(False)
-        self.show_traces_checkbox.setChecked(True)  # Traces shown by default
+        self.show_traces_checkbox.setChecked(True)
         self.show_traces_checkbox.stateChanged.connect(self._on_toggle_traces_clicked)
-        button_row2.addWidget(self.show_traces_checkbox)
-        
-        button_row2.addStretch()
-        controls_layout.addLayout(button_row2)
+        self.show_traces_checkbox.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.show_traces_checkbox.setMinimumHeight(30)
+
+        # Place widgets in grid so columns align
+        grid.addWidget(self.auto_detect_button, 0, 0)
+        grid.addWidget(self.select_beads_button, 0, 1)
+        grid.addWidget(self.load_tracking_button, 0, 2)
+
+        grid.addWidget(self.start_tracking_button, 1, 0)
+        grid.addWidget(self.pause_button, 1, 1)
+        grid.addWidget(self.clear_button, 1, 2)
+        grid.addWidget(self.show_traces_checkbox, 1, 3)
+
+        # Make columns aligned by using the widest button in each column
+        col0_w = max(self.auto_detect_button.sizeHint().width(), self.start_tracking_button.sizeHint().width()) + 20
+        col1_w = max(self.select_beads_button.sizeHint().width(), self.pause_button.sizeHint().width()) + 20
+        col2_w = max(self.load_tracking_button.sizeHint().width(), self.clear_button.sizeHint().width()) + 20
+
+        for btn in (self.auto_detect_button, self.start_tracking_button):
+            btn.setFixedWidth(col0_w)
+        for btn in (self.select_beads_button, self.pause_button):
+            btn.setFixedWidth(col1_w)
+        for btn in (self.load_tracking_button, self.clear_button):
+            btn.setFixedWidth(col2_w)
+
+        controls_layout.addLayout(grid)
         
         controls_group.setLayout(controls_layout)
         layout.addWidget(controls_group)
@@ -168,7 +179,8 @@ class XYTracesTab(QWidget):
         self.status_layout = QFormLayout(status_group)
         self.status_layout.setContentsMargins(8, 8, 8, 8)
         self.status_layout.setSpacing(5)
-        self.status_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        # Align labels to the left and we'll set a fixed label column width based on the longest label
+        self.status_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(status_group)
         
         layout.addStretch()
@@ -178,11 +190,19 @@ class XYTracesTab(QWidget):
         # Label
         label = QLabel(label_text)
         label.setStyleSheet("color: #666;")
+        # Ensure labels have a consistent width based on the longest label seen
+        fm = label.fontMetrics()
+        label_w = fm.boundingRect(label_text).width() + 8
+        if label_w > self._status_label_width:
+            self._status_label_width = label_w
+        label.setFixedWidth(self._status_label_width)
+        label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         
         # Value
         value = QLabel(value_text)
         value.setWordWrap(True)
         value.setStyleSheet("color: #222;")
+        value.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         
         # Add to form layout
         self.status_layout.addRow(label, value)
@@ -281,9 +301,6 @@ class XYTracesTab(QWidget):
             self.select_beads_button.setText("Add")
             self.start_tracking_button.setEnabled(True)
             self.clear_button.setEnabled(True)
-            self.save_button.setEnabled(True)
-            self.export_button.setEnabled(True)
-            self.add_template_button.setEnabled(True)
             
             # Check completeness
             num_tracked = len(beads_data[0]['positions']) if beads_data else 0
@@ -346,9 +363,11 @@ class XYTracesTab(QWidget):
             bead_positions[bead_id] = (x, y)
             self.next_bead_id += 1
         
-        # Update display with correct bead IDs
+        # Update display with correct bead IDs (use tracker trace history)
         if self.video_widget:
-            self.video_widget.update_bead_positions(bead_positions)  # type: ignore
+            frame_idx = self.video_widget.controller.current_frame_index
+            traces = self._build_trace_history(frame_idx)
+            self.video_widget.update_bead_positions(bead_positions, record_trace=False, traces_override=traces)  # type: ignore
         
         # Update UI
         self.auto_detect_button.setEnabled(False)
@@ -356,15 +375,11 @@ class XYTracesTab(QWidget):
         self.start_tracking_button.setEnabled(True)
         self.clear_button.setEnabled(True)
         self.show_traces_checkbox.setEnabled(True)
-        self.add_template_button.setEnabled(True)
-        
+
         self._update_status(f"{len(self.detected_positions)} beads detected", "R-click remove, L-click add")
     
     def _on_select_beads_clicked(self):
-        """Manual bead selection."""
-        if self.add_template_button.isChecked():
-            self.add_template_button.setChecked(False)
-
+        """Manual bead selection (Add)."""
         if not self.is_selecting and not self.is_validating:
             # Start selection
             self.is_selecting = True
@@ -373,50 +388,24 @@ class XYTracesTab(QWidget):
             if self.video_widget:
                 self.video_widget.set_click_to_select_mode(True)  # type: ignore
                 self.video_widget.set_tracking_enabled(True)  # type: ignore
-            self.add_template_button.setEnabled(False)
             self._update_status("Manual selection mode", "Click beads to add")
         else:
             # End selection
             self.is_selecting = False
             self.is_validating = False
-            self.select_beads_button.setText("Manual")
+            self.select_beads_button.setText("Add")
             if self.video_widget:
                 self.video_widget.set_click_to_select_mode(False)  # type: ignore
             
             if len(self.tracker.beads) > 0:
                 self.start_tracking_button.setEnabled(True)
                 self.clear_button.setEnabled(True)
-                self.add_template_button.setEnabled(True)
                 self._update_status(f"{len(self.tracker.beads)} beads selected", "Ready to track")
 
-    def _on_add_template_mode_toggled(self, checked: bool):
-        """Toggle focus template capture mode."""
-        if checked:
-            if self.is_selecting:
-                QMessageBox.information(self, "Finish Selection", "Finish manual selection before adding templates.")
-                self.add_template_button.setChecked(False)
-                return
-
-            if not self.tracker.beads:
-                QMessageBox.warning(self, "No Beads", "Add beads before capturing templates.")
-                self.add_template_button.setChecked(False)
-                return
-
-            self.is_adding_template = True
-            if self.video_widget:
-                self.video_widget.set_click_to_select_mode(True)  # type: ignore
-            bead_count = len(self.tracker.beads)
-            self._update_status(f"Template mode: {bead_count} beads", "Click bead focus appearance to store template")
-        else:
-            self.is_adding_template = False
-            if not self.is_selecting and not self.is_validating and self.video_widget:
-                self.video_widget.set_click_to_select_mode(False)  # type: ignore
+    
     
     def _on_bead_clicked(self, x: int, y: int):
         """Add bead at clicked position."""
-        if self.is_adding_template:
-            self._add_template_from_click(x, y)
-            return
 
         if not self.is_selecting and not self.is_validating:
             return
@@ -431,21 +420,20 @@ class XYTracesTab(QWidget):
         try:
             self.tracker.add_bead(current_frame, x, y, self.next_bead_id)
         except ValueError as exc:
-            QMessageBox.warning(self, "Template Error", str(exc))
+            QMessageBox.warning(self, "Error", str(exc))
             return
         self.next_bead_id += 1
-        self.add_template_button.setEnabled(True)
-        
-        # Update display
+
+        # Update display (use record_trace=False; traces will be built from tracker history)
         bead_positions = {bead['id']: bead['positions'][0] for bead in self.tracker.beads}
-        self.video_widget.update_bead_positions(bead_positions)  # type: ignore
-        
+        traces = self._build_trace_history(0)
+        if self.video_widget:
+            self.video_widget.update_bead_positions(bead_positions, record_trace=False, traces_override=traces)  # type: ignore
+
         self._update_status(f"{len(self.tracker.beads)} beads", "Bead added")
     
     def _on_bead_right_clicked(self, x: int, y: int):
         """Remove bead at clicked position."""
-        if self.is_adding_template:
-            return
 
         if not self.is_selecting and not self.is_validating:
             return
@@ -468,47 +456,10 @@ class XYTracesTab(QWidget):
             
             self._update_status(f"{len(self.tracker.beads)} beads", "Bead removed")
             if len(self.tracker.beads) == 0:
-                self.add_template_button.setChecked(False)
-                self.add_template_button.setEnabled(False)
+                # nothing to disable (template UI removed)
+                pass
 
-    def _add_template_from_click(self, x: int, y: int) -> None:
-        """Capture an additional template for the nearest bead."""
-        if not self.video_widget:
-            return
-
-        current_frame = self.video_widget.get_current_frame()
-        if current_frame is None:
-            return
-
-        bead = self._find_nearest_bead(x, y)
-        if bead is None:
-            self._update_status("Template mode", "Click closer to an existing bead")
-            return
-
-        bead_id = bead['id']
-        try:
-            self.tracker.add_focus_template(current_frame, bead_id, x, y)
-            template_count = len(bead.get('templates', []))
-            self._update_status(f"Template saved for bead {bead_id}", f"Stored templates: {template_count}")
-        except ValueError as exc:
-            QMessageBox.warning(self, "Template Error", str(exc))
-
-    def _find_nearest_bead(self, x: int, y: int, max_distance: float = 25.0):
-        """Return the bead closest to the provided coordinates within a threshold."""
-        nearest_bead = None
-        min_distance = float('inf')
-        for bead in self.tracker.beads:
-            bead_x, bead_y = bead['positions'][-1] if bead['positions'] else (None, None)
-            if bead_x is None or bead_y is None:
-                continue
-            distance = float(np.hypot(x - bead_x, y - bead_y))
-            if distance < min_distance:
-                min_distance = distance
-                nearest_bead = bead
-
-        if nearest_bead is not None and min_distance <= max_distance:
-            return nearest_bead
-        return None
+    # Template-related functionality removed
     
     def _on_start_tracking_clicked(self):
         """Start or stop tracking."""
@@ -545,8 +496,6 @@ class XYTracesTab(QWidget):
         self.pause_button.setText("Pause")
         self.pause_button.setEnabled(True)
         self.select_beads_button.setEnabled(False)
-        self.add_template_button.setChecked(False)
-        self.add_template_button.setEnabled(False)
         
         # Show initial status with bead count
         self._update_status(f"Starting: {num_beads} beads", f"Frame 0/{self.total_tracking_frames}")
@@ -597,7 +546,9 @@ class XYTracesTab(QWidget):
                 # Only update display on last frame of batch
                 if i == frames_to_process - 1 and self.video_widget is not None:
                     bead_positions = {bid: (x, y) for bid, x, y in results}
-                    self.video_widget.update_bead_positions(bead_positions)
+                    # Use tracker-built trace history to avoid mismatch / double-appending
+                    traces = self._build_trace_history(self.current_tracking_frame)
+                    self.video_widget.update_bead_positions(bead_positions, record_trace=False, traces_override=traces)
             
             # Update status and save
             num_beads = len(self.tracker.beads)
@@ -620,8 +571,7 @@ class XYTracesTab(QWidget):
         num_beads = len(self.tracker.beads)
         self._update_status(f"Complete: {num_beads} beads", f"All {self.total_tracking_frames} frames tracked")
         
-        self.export_button.setEnabled(True)
-        self.save_button.setEnabled(True)
+    # Export/Save buttons removed (auto-save occurs during tracking)
         self._stop_tracking()
     
     def _stop_tracking(self):
@@ -633,8 +583,7 @@ class XYTracesTab(QWidget):
         self.pause_button.setText("Pause")
         self.pause_button.setEnabled(False)
         self.select_beads_button.setEnabled(True)
-        if len(self.tracker.beads) > 0:
-            self.add_template_button.setEnabled(True)
+        # no template button to re-enable
     
     def _save_tracking_to_hdf5(self):
         """Save tracking data to HDF5."""
@@ -673,64 +622,7 @@ class XYTracesTab(QWidget):
             import traceback
             traceback.print_exc()
     
-    def _on_save_to_hdf5_clicked(self):
-        """Manual save to HDF5."""
-        if not self.current_hdf5_path:
-            QMessageBox.warning(self, "No File", "No HDF5 file loaded.")
-            return
-        
-        if len(self.tracker.beads) == 0:
-            # Check if data exists in HDF5 file already
-            if TrackingDataIO.has_tracking_data(self.current_hdf5_path):
-                QMessageBox.information(
-                    self, "Already Saved",
-                    f"Tracking data already saved to:\n/analysed_data/xy_tracking"
-                )
-            else:
-                QMessageBox.warning(self, "No Data", "No tracking data to save.\n\nPlease:\n1. Click 'Auto' or 'Manual' to detect beads\n2. Click 'Start Tracking' to track them")
-            return
-        
-        try:
-            self._save_tracking_to_hdf5()
-            num_frames = len(self.tracker.beads[0]['positions']) if self.tracker.beads else 0
-            QMessageBox.information(
-                self, "Saved",
-                f"Saved to /analysed_data/xy_tracking\n\nBeads: {len(self.tracker.beads)}\nFrames: {num_frames}"
-            )
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed:\n{str(e)}")
-    
-    def _on_export_clicked(self):
-        """Export tracking data to CSV."""
-        if not self.current_hdf5_path:
-            QMessageBox.warning(self, "No File", "No HDF5 file loaded.")
-            return
-        
-        # Check if we have data in tracker or in HDF5 file
-        has_data_in_memory = len(self.tracker.beads) > 0
-        has_data_in_file = TrackingDataIO.has_tracking_data(self.current_hdf5_path)
-        
-        if not has_data_in_memory and not has_data_in_file:
-            QMessageBox.warning(self, "No Data", "No tracking data to export.")
-            return
-        
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Export CSV",
-            str(Path(self.current_hdf5_path).with_suffix('.csv')),
-            "CSV Files (*.csv)"
-        )
-        
-        if file_path:
-            try:
-                # Save to HDF5 first if we have data in memory
-                if has_data_in_memory:
-                    self._save_tracking_to_hdf5()
-                
-                # Export from HDF5 to CSV
-                TrackingDataIO.export_to_csv(self.current_hdf5_path, file_path)
-                QMessageBox.information(self, "Exported", f"Exported to:\n{file_path}")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Export failed:\n{str(e)}")
+    # Manual Save/Export UI removed - saving happens automatically during tracking
     
     def _on_clear_clicked(self):
         """Clear all tracking data."""
@@ -818,13 +710,10 @@ class XYTracesTab(QWidget):
             self.video_widget.set_click_to_select_mode(False)
         
         self.auto_detect_button.setEnabled(True)
-        self.select_beads_button.setText("Manual")
+        self.select_beads_button.setText("Add")
         self.start_tracking_button.setText("Start Tracking")
         self.start_tracking_button.setEnabled(False)
         self.clear_button.setEnabled(False)
         self.show_traces_checkbox.setEnabled(False)
-        self.export_button.setEnabled(False)
-        self.save_button.setEnabled(False)
-        self.add_template_button.setChecked(False)
-        self.add_template_button.setEnabled(False)
+        # Save/Export/UI removed - traces are handled automatically
         self._clear_status()
