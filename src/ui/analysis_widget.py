@@ -51,12 +51,14 @@ class AnalysisWidget(QWidget):
         from src.ui.tabs.info_tab import InfoTab
         from src.ui.tabs.xy_traces_tab import XYTracesTab
         from src.ui.tabs.z_traces_tab import ZTracesTab
+        from src.ui.tabs.preview_tab import PreviewTab
         from src.ui.tabs.analysis_tab import AnalysisTab
         
-        # Create and add tabs (Info first)
+        # Create and add tabs (Info first, then tracking, preview, analysis)
         self.tab_widget.addTab(InfoTab(), "Info")
         self.tab_widget.addTab(XYTracesTab(), "XY Traces")
         self.tab_widget.addTab(ZTracesTab(), "Z Traces")
+        self.tab_widget.addTab(PreviewTab(), "Preview")
         self.tab_widget.addTab(AnalysisTab(), "Analysis")
     
     def update_video_info(self):

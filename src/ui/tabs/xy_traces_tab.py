@@ -154,6 +154,13 @@ class XYTracesTab(QWidget):
         self.show_traces_checkbox.stateChanged.connect(self._on_toggle_traces_clicked)
         self.show_traces_checkbox.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.show_traces_checkbox.setMinimumHeight(30)
+        
+        # Stuck bead checkbox (placeholder for drift correction)
+        self.stuck_bead_checkbox = QCheckBox("Stuck Bead")
+        self.stuck_bead_checkbox.setEnabled(False)  # Disabled for now
+        self.stuck_bead_checkbox.setToolTip("Mark as stuck bead for drift correction (coming soon)")
+        self.stuck_bead_checkbox.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.stuck_bead_checkbox.setMinimumHeight(30)
 
         # Place widgets in grid so columns align
         grid.addWidget(self.auto_detect_button, 0, 0)
@@ -164,6 +171,7 @@ class XYTracesTab(QWidget):
         grid.addWidget(self.pause_button, 1, 1)
         grid.addWidget(self.clear_button, 1, 2)
         grid.addWidget(self.show_traces_checkbox, 1, 3)
+        grid.addWidget(self.stuck_bead_checkbox, 1, 4)
 
         # Make columns aligned by using the widest button in each column
         col0_w = max(self.auto_detect_button.sizeHint().width(), self.start_tracking_button.sizeHint().width()) + 20
@@ -579,8 +587,38 @@ class XYTracesTab(QWidget):
         num_beads = len(self.tracker.beads)
         self._update_status(f"Complete: {num_beads} beads", f"All {self.total_tracking_frames} frames tracked")
         
+        # Notify Preview tab with tracking data
+        self._update_preview_tab()
+        
     # Export/Save buttons removed (auto-save occurs during tracking)
         self._stop_tracking()
+    
+    def _update_preview_tab(self):
+        """Update Preview tab with current tracking data."""
+        if not self.video_widget:
+            return
+        
+        # Get parent widget (AnalysisWidget) to access other tabs
+        parent = self.parent()
+        while parent and not hasattr(parent, 'tab_widget'):
+            parent = parent.parent()
+        
+        if parent and hasattr(parent, 'tab_widget'):
+            # Find Preview tab
+            for i in range(parent.tab_widget.count()):  # type: ignore
+                tab = parent.tab_widget.widget(i)  # type: ignore
+                if hasattr(tab, 'load_tracking_data'):
+                    # Convert tracker beads to format Preview tab expects
+                    tracking_data = {}
+                    for bead in self.tracker.beads:
+                        bead_id = bead['id']
+                        tracking_data[bead_id] = {
+                            'positions': bead['positions'],
+                            'initial_pos': bead.get('initial_pos'),
+                        }
+                    tab.load_tracking_data(tracking_data)  # type: ignore
+                    Logger.info(f"Updated Preview tab with {len(tracking_data)} beads", "XY_TAB")
+                    break
     
     def _stop_tracking(self):
         """Stop tracking."""
