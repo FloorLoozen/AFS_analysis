@@ -394,26 +394,72 @@ class InfoTab(QWidget):
         
         # Sort additional metadata in logical order by category
         def metadata_sort_key(key):
-            # Define logical ordering by category
-            processing_terms = ['gpu', 'chunk', 'downscale', 'post_compressed', 'post_processed', 
-                              'quality_reduction', 'original_compression', 'post_compression']
-            timing_terms = ['timestamp', 'started', 'finished', 'processing_time', 'avg', 'fps_efficiency']
-            stats_terms = ['min', 'max', 'mean', 'median', 'std']
-            system_terms = ['system', 'platform', 'version', 'processor']
-            
+            # Define logical ordering by category with specific field priorities
             key_lower = key.lower()
             
-            # Category priority: processing -> timing -> stats -> system -> other
-            if any(term in key_lower for term in processing_terms):
-                return (0, key)
-            elif any(term in key_lower for term in timing_terms):
-                return (1, key)
-            elif any(term in key_lower for term in stats_terms):
-                return (2, key)
-            elif any(term in key_lower for term in system_terms):
-                return (3, key)
+            # Category 0: GPU/Processing configuration (setup info)
+            if 'gpu_acceleration' in key_lower:
+                return (0, 0, key)
+            elif 'gpu_frames_processed' in key_lower:
+                return (0, 1, key)
+            elif 'chunk_size' in key_lower:
+                return (0, 2, key)
+            elif 'downscale_factor' in key_lower:
+                return (0, 3, key)
+            
+            # Category 1: Compression settings
+            elif 'original_compression' in key_lower:
+                return (1, 0, key)
+            elif 'post_compressed' in key_lower:
+                return (1, 1, key)
+            elif 'post_compression' in key_lower:
+                return (1, 2, key)
+            elif 'post_processed' in key_lower:
+                return (1, 3, key)
+            elif 'quality_reduction' in key_lower:
+                return (1, 4, key)
+            
+            # Category 2: Timing and performance
+            elif 'avg_downscale_time' in key_lower or 'avg' in key_lower:
+                return (2, 0, key)
+            elif 'fps_efficiency' in key_lower:
+                return (2, 1, key)
+            elif 'processing_time' in key_lower:
+                return (2, 2, key)
+            elif 'finished_at' in key_lower or 'finished' in key_lower:
+                return (2, 3, key)
+            elif 'post_processing_timestamp' in key_lower:
+                return (2, 4, key)
+            
+            # Category 3: Frame statistics (min, max, mean)
+            elif key_lower == 'min':
+                return (3, 0, key)
+            elif key_lower == 'max':
+                return (3, 1, key)
+            elif key_lower == 'mean':
+                return (3, 2, key)
+            elif 'median' in key_lower or 'std' in key_lower:
+                return (3, 3, key)
+            
+            # Category 4: Data size info
+            elif 'frame_size' in key_lower:
+                return (4, 0, key)
+            elif 'recording_duration' in key_lower:
+                return (4, 1, key)
+            elif 'total_data' in key_lower:
+                return (4, 2, key)
+            
+            # Category 5: System info
+            elif 'system' in key_lower:
+                return (5, 0, key)
+            elif 'compression_level' in key_lower:
+                return (5, 1, key)
+            elif 'data_type' in key_lower:
+                return (5, 2, key)
+            
+            # Category 6: Everything else (alphabetically)
             else:
-                return (4, key)
+                return (6, 0, key)
         
         additional_keys = sorted(
             [k for k in metadata.keys() if k not in displayed_keys and k not in skip_keys],
@@ -451,9 +497,11 @@ class InfoTab(QWidget):
                 if 'avg_downscale_time' in key_lower or 'processing_time' in key_lower:
                     display_key = display_key + ' (ms):'
                 elif key_lower == 'min':
-                    display_key = 'Min Pixel Intensity:'  # Clarify it's pixel values
+                    display_key = 'Min Pixel Intensity:'
                 elif key_lower == 'max':
-                    display_key = 'Max Pixel Intensity:'  # Clarify it's pixel values
+                    display_key = 'Max Pixel Intensity:'
+                elif key_lower == 'mean':
+                    display_key = 'Mean Pixel Intensity:'
                 elif 'frame_size' in key_lower:
                     display_key = display_key + ' (bytes):'
                 elif 'total_data' in key_lower and 'mb' not in key_lower:
