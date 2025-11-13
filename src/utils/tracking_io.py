@@ -83,6 +83,9 @@ class TrackingDataIO:
                 xy_group.attrs[f'bead_{bead_idx}_id'] = bead_id
                 xy_group.attrs[f'bead_{bead_idx}_initial_x'] = initial_x
                 xy_group.attrs[f'bead_{bead_idx}_initial_y'] = initial_y
+                # Save per-bead stuck flag if present
+                if 'stuck' in bead:
+                    xy_group.attrs[f'bead_{bead_idx}_stuck'] = bool(bead['stuck'])
                 
                 # Save template if available
                 if 'template' in bead and bead['template'] is not None:
@@ -171,7 +174,8 @@ class TrackingDataIO:
                             'id': bead_id,
                             'positions': positions,
                             'initial_pos': (initial_x, initial_y),
-                            'template': template
+                            'template': template,
+                            'stuck': bool(xy_group.attrs.get(f'bead_{bead_idx}_stuck', False))
                         }
                         
                         beads_data.append(bead)
@@ -209,7 +213,8 @@ class TrackingDataIO:
                             'id': bead_id,
                             'positions': positions,
                             'initial_pos': (initial_x, initial_y),
-                            'template': template
+                            'template': template,
+                            'stuck': bool(metadata.get(f'bead_{bead_idx}_stuck', False))
                         }
                         
                         beads_data.append(bead)

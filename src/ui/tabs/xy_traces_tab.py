@@ -155,12 +155,7 @@ class XYTracesTab(QWidget):
         self.show_traces_checkbox.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.show_traces_checkbox.setMinimumHeight(30)
         
-        # Stuck bead checkbox (placeholder for drift correction)
-        self.stuck_bead_checkbox = QCheckBox("Stuck Bead")
-        self.stuck_bead_checkbox.setEnabled(False)  # Disabled for now
-        self.stuck_bead_checkbox.setToolTip("Mark as stuck bead for drift correction (coming soon)")
-        self.stuck_bead_checkbox.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.stuck_bead_checkbox.setMinimumHeight(30)
+        # (stuck bead checkbox moved to Preview tab - per-bead control)
 
         # Place widgets in grid so columns align
         grid.addWidget(self.auto_detect_button, 0, 0)
@@ -171,7 +166,6 @@ class XYTracesTab(QWidget):
         grid.addWidget(self.pause_button, 1, 1)
         grid.addWidget(self.clear_button, 1, 2)
         grid.addWidget(self.show_traces_checkbox, 1, 3)
-        grid.addWidget(self.stuck_bead_checkbox, 1, 4)
 
         # Make columns aligned by using the widest button in each column
         col0_w = max(self.auto_detect_button.sizeHint().width(), self.start_tracking_button.sizeHint().width()) + 20
@@ -609,13 +603,46 @@ class XYTracesTab(QWidget):
                 tab = parent.tab_widget.widget(i)  # type: ignore
                 if hasattr(tab, 'load_tracking_data'):
                     # Convert tracker beads to format Preview tab expects
+                    # Try to extract a global voltage/amplitude from video metadata so Preview can plot voltage vs time
+                    meta = self.video_widget.get_metadata() or {}
+                    gv = None
+                    for key in ('voltage', 'amplitude', 'amp'):
+                        if key in meta:
+                            gv = meta.get(key)
+                            break
+
                     tracking_data = {}
                     for bead in self.tracker.beads:
                         bead_id = bead['id']
+                        positions = bead.get('positions', [])
+                        n = len(positions)
+
+                        # Build per-bead voltage series from global metadata if present
+                        if gv is None:
+                            voltage = [float('nan')] * n
+                        else:
+                            try:
+                                if hasattr(gv, '__len__') and not isinstance(gv, (str, bytes)):
+                                    # If gv is array-like, slice/pad to length n
+                                    if len(gv) >= n:
+                                        voltage = list(map(float, gv[:n]))
+                                    else:
+                                        arr = [float(v) for v in gv]
+                                        arr += [float('nan')] * (n - len(arr))
+                                        voltage = arr
+                                else:
+                                    # Scalar amplitude -> constant series
+                                    voltage = [float(gv)] * n
+                            except Exception:
+                                voltage = [float('nan')] * n
+
                         tracking_data[bead_id] = {
-                            'positions': bead['positions'],
+                            'positions': positions,
                             'initial_pos': bead.get('initial_pos'),
+                            'voltage': voltage,
+                            'stuck': bool(bead.get('stuck', False)),
                         }
+
                     tab.load_tracking_data(tracking_data)  # type: ignore
                     Logger.info(f"Updated Preview tab with {len(tracking_data)} beads", "XY_TAB")
                     break
@@ -693,7 +720,9 @@ class XYTracesTab(QWidget):
         if self.video_widget.last_displayed_frame is not None:
             frame_index = self.video_widget.controller.current_frame_index
             self.video_widget._on_frame_changed(frame_index, self.video_widget.last_displayed_frame.copy())
-
+    
+    # stuck-bead control moved to Preview tab; handler removed from XY Traces tab
+        
     def _build_trace_history(self, frame_index: int) -> Dict[int, List[Tuple[int, int]]]:
         """Return bead traces up to the provided frame index."""
         traces: Dict[int, List[Tuple[int, int]]] = {}
