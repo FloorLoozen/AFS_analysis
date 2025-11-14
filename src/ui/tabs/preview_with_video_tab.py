@@ -28,7 +28,8 @@ class PreviewWithVideoTab(QWidget):
             self.setAutoFillBackground(True)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 16, 0, 0)
+        # Uniform outer margin so group boxes have equal space from the widget edges
+        layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(6)
         
         # Left: Video container (1/3 width) - divided into 2 rows

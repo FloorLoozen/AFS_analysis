@@ -53,7 +53,8 @@ class TracesWithVideoTab(QWidget):
             self.setAutoFillBackground(True)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 16, 0, 0)
+        # Uniform outer margin for consistent spacing around group boxes
+        layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(6)
         
         # Left: Video container (1/3 width) - divided into 2 rows

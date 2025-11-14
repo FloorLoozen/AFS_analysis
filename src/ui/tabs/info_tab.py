@@ -34,10 +34,10 @@ class InfoTab(QWidget):
     
     def _init_ui(self):
         """Initialize the user interface with scrollable metadata."""
-        # Main layout
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+    # Main layout - give a uniform outer margin so the group boxes have equal spacing
+    main_layout = QVBoxLayout(self)
+    main_layout.setContentsMargins(8, 8, 8, 8)
+    main_layout.setSpacing(0)
         
         # Create scroll area without frame
         scroll_area = QScrollArea()
@@ -48,9 +48,10 @@ class InfoTab(QWidget):
         
         # Container widget for scroll area
         scroll_widget = QWidget()
-        layout = QVBoxLayout(scroll_widget)
-        layout.setContentsMargins(8, 16, 8, 8)
-        layout.setSpacing(10)
+    layout = QVBoxLayout(scroll_widget)
+    # Use uniform top margin here as well for visual consistency
+    layout.setContentsMargins(8, 8, 8, 8)
+    layout.setSpacing(10)
         
         # GPU/System Info Section (always visible)
         system_group = QGroupBox("System Info")

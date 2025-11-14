@@ -66,8 +66,11 @@ class PreviewTab(QWidget):
     def _init_ui(self):
         """Initialize UI layout."""
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 0, 8, 8)
-        
+        # Keep left/right outer margins and zero top/bottom inner margin so the
+        # right-side splitter aligns vertically with the video group boxes on the left
+        # (the parent container already provides the outer padding).
+        layout.setContentsMargins(8, 0, 8, 0)
+
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self._create_bead_list_panel())
         splitter.addWidget(self._create_plots_panel())
