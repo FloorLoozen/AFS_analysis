@@ -8,11 +8,10 @@ Provides a bead list and three plots:
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
-    QLabel, QGroupBox, QSplitter, QCheckBox, QSizePolicy
+    QLabel, QGroupBox, QSplitter, QCheckBox, QSizePolicy, QApplication
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPalette, QPixmap, QImage
-from PyQt5.QtWidgets import QApplication
 from typing import Optional, Tuple, Dict, List
 import numpy as np
 import cv2
@@ -74,13 +73,18 @@ class PreviewTab(QWidget):
         """Create bead list panel with checkboxes."""
         gb = QGroupBox("Tracked Beads")
         layout = QVBoxLayout(gb)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
         
         self.bead_list = QListWidget()
         self.bead_list.currentItemChanged.connect(self._on_bead_selected)
+        # Set background to match the rest of the UI and remove border
+        self.bead_list.setStyleSheet("QListWidget { background-color: #f0f0f0; border: none; }")
         layout.addWidget(self.bead_list)
         
-        # Controls row
+        # Controls row at bottom
         controls = QHBoxLayout()
+        controls.setContentsMargins(0, 4, 0, 0)
         self.select_all = QCheckBox("Select All")
         self.select_all.stateChanged.connect(self._toggle_select_all)
         controls.addWidget(self.select_all)
@@ -103,12 +107,25 @@ class PreviewTab(QWidget):
         self.xy_label = self._create_plot_label(150)
         self.time_xy_label = self._create_plot_label(150)
         self.time_zv_label = self._create_plot_label(150)
-
-        # Add widgets: top plot, small spacer, middle plot, bottom plot
+        
+        # Add plots first
         layout.addWidget(self.xy_label, 1)
         layout.addSpacing(30)
         layout.addWidget(self.time_xy_label, 1)
         layout.addWidget(self.time_zv_label, 1)
+        
+        # Checkbox for stuck bead - positioned at bottom left
+        self.stuck_bead_checkbox = QCheckBox("Stuck Bead")
+        self.stuck_bead_checkbox.setEnabled(False)  # Disabled until a bead is selected
+        self.stuck_bead_checkbox.stateChanged.connect(self._on_stuck_bead_changed)
+        
+        # Create horizontal layout for checkbox (left-aligned at bottom)
+        checkbox_layout = QHBoxLayout()
+        checkbox_layout.setContentsMargins(0, 4, 0, 0)
+        checkbox_layout.addWidget(self.stuck_bead_checkbox)
+        checkbox_layout.addStretch()  # Push checkbox to the left
+        
+        layout.addLayout(checkbox_layout)
 
         return gb
     
@@ -125,6 +142,14 @@ class PreviewTab(QWidget):
     def set_video_widget(self, vw):
         """Set video widget reference for FPS access."""
         self.video_widget = vw
+
+    def on_video_loaded(self):
+        """Called when a new video is loaded."""
+        # Clear any existing data
+        self.bead_list.clear()
+        self.tracked_beads = {}
+        self.count_label.setText("0 beads loaded")
+        self.select_all.setChecked(False)
 
     def load_tracking_data(self, tracking_data: Dict):
         """Load bead tracking data.
@@ -433,7 +458,43 @@ class PreviewTab(QWidget):
     def _on_bead_selected(self, current, previous=None):
         """Handle bead selection change."""
         if current:
-            self._update_plots_for_bead(current.data(Qt.UserRole))
+            bead_id = current.data(Qt.UserRole)
+            self._update_plots_for_bead(bead_id)
+            
+            # Update stuck bead checkbox based on bead's stuck state
+            self.stuck_bead_checkbox.setEnabled(True)
+            bead = self.tracked_beads.get(bead_id)
+            if bead:
+                # Block signals to avoid triggering the handler
+                self.stuck_bead_checkbox.blockSignals(True)
+                self.stuck_bead_checkbox.setChecked(bead.get('stuck', False))
+                self.stuck_bead_checkbox.blockSignals(False)
+        else:
+            # No bead selected, disable checkbox
+            self.stuck_bead_checkbox.setEnabled(False)
+            self.stuck_bead_checkbox.setChecked(False)
+
+    def _on_stuck_bead_changed(self, state):
+        """Handle stuck bead checkbox state change."""
+        current = self.bead_list.currentItem()
+        if not current:
+            return
+            
+        bead_id = current.data(Qt.UserRole)
+        bead = self.tracked_beads.get(bead_id)
+        if not bead:
+            return
+            
+        # Update stuck state
+        is_stuck = (state == Qt.CheckState.Checked)
+        bead['stuck'] = is_stuck
+        
+        # Update the bead list item text to show/hide lock icon
+        base_name = f"Bead {bead_id + 1}"
+        if is_stuck:
+            current.setText(f"{base_name} 🔒")
+        else:
+            current.setText(base_name)
 
     def _toggle_select_all(self, state):
         """Toggle all bead checkboxes."""
@@ -484,6 +545,62 @@ class PreviewTab(QWidget):
         qimg = QImage(img.data, img.shape[1], img.shape[0], 
                      4 * img.shape[1], QImage.Format_RGBA8888)
         return QPixmap.fromImage(qimg)
+    
+    @staticmethod
+    def _get_nice_tick_values(vmin: float, vmax: float, num_ticks: int = 5) -> list:
+        """Calculate nice round tick values for axis labels.
+        
+        Returns list of (fraction, value, label_text) tuples where:
+        - fraction is the position along the axis (0 to 1)
+        - value is the actual data value
+        - label_text is the formatted string to display
+        """
+        data_range = vmax - vmin
+        if data_range < 1e-6:
+            # Degenerate range, just use equal spacing
+            return [(i/4.0, vmin + i/4.0 * data_range, f'{vmin + i/4.0 * data_range:.1f}') 
+                    for i in range(num_ticks)]
+        
+        # Calculate nice step size
+        rough_step = data_range / (num_ticks - 1)
+        magnitude = 10 ** np.floor(np.log10(rough_step))
+        
+        # Normalize and find nice step (1, 2, 2.5, 5, or 10 of the magnitude)
+        normalized = rough_step / magnitude
+        if normalized <= 1.0:
+            nice_step = 1.0 * magnitude
+        elif normalized <= 2.0:
+            nice_step = 2.0 * magnitude
+        elif normalized <= 2.5:
+            nice_step = 2.5 * magnitude
+        elif normalized <= 5.0:
+            nice_step = 5.0 * magnitude
+        else:
+            nice_step = 10.0 * magnitude
+        
+        # Find nice start value (round down to nearest nice_step)
+        nice_min = np.floor(vmin / nice_step) * nice_step
+        
+        # Generate tick values
+        ticks = []
+        tick_val = nice_min
+        while tick_val <= vmax + nice_step * 0.01:  # Small tolerance
+            if tick_val >= vmin - nice_step * 0.01:  # Within range
+                # Calculate fraction along axis
+                frac = (tick_val - vmin) / data_range
+                
+                # Format label: use .0f for integers, .1f for half-steps, .2f otherwise
+                if abs(tick_val - round(tick_val)) < 1e-6:
+                    label = f'{int(round(tick_val))}'
+                elif abs(tick_val * 2 - round(tick_val * 2)) < 1e-6:
+                    label = f'{tick_val:.1f}'
+                else:
+                    label = f'{tick_val:.2f}'
+                
+                ticks.append((frac, tick_val, label))
+            tick_val += nice_step
+        
+        return ticks
     
     def _draw_rotated_text(self, buf: np.ndarray, text: str, x: int, y: int,
                           font_scale: float = FONT_LABEL,
@@ -685,28 +802,48 @@ class PreviewTab(QWidget):
         except Exception:
             cv2.putText(buf, 'X (px)', (5, mt + ph // 2), self.FONT, self.FONT_LABEL, blue, 1, self.LINE_AA)
 
-        # Tick marks (bottom/top and left/right) with numbers on both sides
-        for i in range(5):
-            frac = i / 4.0
-            # Time ticks (bottom and top)
+        # Calculate nice tick values for time axis (more ticks for better resolution)
+        time_ticks = self._get_nice_tick_values(tmin, tmax, 11)
+        
+        # Draw time ticks (bottom and top) - major ticks with nice labels
+        for frac, tick_val, label in time_ticks:
             tick_x = ml + int(frac * pw)
-            # draw ticks inward into the plot area
+            # draw major ticks inward into the plot area (longer)
             cv2.line(buf, (tick_x, mt + ph), (tick_x, mt + ph - 5), (0, 0, 0, 255), 1, self.LINE_AA)
             cv2.line(buf, (tick_x, mt), (tick_x, mt + 5), (0, 0, 0, 255), 1, self.LINE_AA)
-            cv2.putText(buf, f'{tmin + frac * (tmax - tmin):.1f}', (tick_x - 12, mt + ph + 22),
+            # Center the label based on its length
+            label_offset = len(label) * 3
+            cv2.putText(buf, label, (tick_x - label_offset, mt + ph + 22),
                        self.FONT, self.FONT_SMALL, (0, 0, 0, 255), 1, self.LINE_AA)
 
-            # Value ticks (left and right)
+        # Calculate nice tick values for value axis (y-axis)
+        value_ticks = self._get_nice_tick_values(vmin, vmax, 9)
+        
+        # Draw value ticks (left and right)
+        for frac, tick_val, label in value_ticks:
             tick_y = mt + int((1 - frac) * ph)
             # draw ticks inward into the plot area
             cv2.line(buf, (ml, tick_y), (ml + 5, tick_y), (0, 0, 0, 255), 1, self.LINE_AA)
             cv2.line(buf, (ml + pw, tick_y), (ml + pw - 5, tick_y), (0, 0, 0, 255), 1, self.LINE_AA)
             # left-side numbers: move a couple pixels further left
-            cv2.putText(buf, f'{vmin + frac * v_range:.0f}', (ml - 28, tick_y + 4),
+            cv2.putText(buf, label, (ml - 28, tick_y + 4),
                        self.FONT, self.FONT_SMALL, (0, 0, 0, 255), 1, self.LINE_AA)
             # right-side numbers: move many pixels to the left (closer to plot)
-            cv2.putText(buf, f'{vmin + frac * v_range:.0f}', (ml + pw + 8, tick_y + 4),
+            cv2.putText(buf, label, (ml + pw + 8, tick_y + 4),
                        self.FONT, self.FONT_SMALL, (0, 0, 0, 255), 1, self.LINE_AA)
+        
+        # Minor ticks on time axis (x-axis) - add subdivisions between major ticks
+        if len(time_ticks) > 1:
+            for i in range(len(time_ticks) - 1):
+                frac1 = time_ticks[i][0]
+                frac2 = time_ticks[i + 1][0]
+                # Add 4 minor ticks between each pair of major ticks
+                for j in range(1, 5):
+                    minor_frac = frac1 + (frac2 - frac1) * j / 5.0
+                    tick_x = ml + int(minor_frac * pw)
+                    # draw shorter minor ticks (3 pixels instead of 5)
+                    cv2.line(buf, (tick_x, mt + ph), (tick_x, mt + ph - 3), (0, 0, 0, 255), 1, self.LINE_AA)
+                    cv2.line(buf, (tick_x, mt), (tick_x, mt + 3), (0, 0, 0, 255), 1, self.LINE_AA)
 
         # Draw traces: X in blue, Y in red (thin lines)
         for i in range(len(xs) - 1):
@@ -867,39 +1004,60 @@ class PreviewTab(QWidget):
                 def py_right(v):
                     return int(mt + ph - (v - t_vmin_final) / max((t_vmax_final - t_vmin_final), 1e-6) * ph)
 
-            # Tick marks and numbers (left and right), match middle plot offsets
-            for i in range(5):
-                frac = i / 4.0
+            # Calculate nice tick values for time and value axes (more ticks for better resolution)
+            time_ticks = self._get_nice_tick_values(tmin, tmax, 11)
+            value_ticks = self._get_nice_tick_values(vmin_sym, vmax_sym, 9)
+            
+            # Draw time ticks (bottom and top) - major ticks with nice labels
+            for frac, tick_val, label in time_ticks:
                 tick_x = ml + int(frac * pw)
-                # draw time ticks inward
+                # draw major time ticks inward (longer)
                 cv2.line(buf, (tick_x, mt + ph), (tick_x, mt + ph - 5), (0, 0, 0, 255), 1, self.LINE_AA)
                 cv2.line(buf, (tick_x, mt), (tick_x, mt + 5), (0, 0, 0, 255), 1, self.LINE_AA)
-                cv2.putText(buf, f'{tmin + frac * (tmax - tmin):.1f}', (tick_x - 12, mt + ph + 22),
+                # Center the label based on its length
+                label_offset = len(label) * 3
+                cv2.putText(buf, label, (tick_x - label_offset, mt + ph + 22),
                            self.FONT, self.FONT_SMALL, (0, 0, 0, 255), 1, self.LINE_AA)
 
+            # Draw value ticks (left and right)
+            for frac, tick_val, label in value_ticks:
                 tick_y = mt + int((1 - frac) * ph)
                 # draw value ticks inward
                 cv2.line(buf, (ml, tick_y), (ml + 5, tick_y), (0, 0, 0, 255), 1, self.LINE_AA)
                 cv2.line(buf, (ml + pw, tick_y), (ml + pw - 5, tick_y), (0, 0, 0, 255), 1, self.LINE_AA)
                 # left-side numbers
-                cv2.putText(buf, f'{vmin_sym + frac * v_range:.1f}', (ml - 28, tick_y + 4),
+                cv2.putText(buf, label, (ml - 28, tick_y + 4),
                            self.FONT, self.FONT_SMALL, (0, 0, 0, 255), 1, self.LINE_AA)
                 # right-side: timeline scale if present, otherwise mirror left values
                 if has_timeline:
-                    tick_val = t_vmin_final + frac * (t_vmax_final - t_vmin_final)
+                    # Calculate timeline value at this fraction
+                    timeline_val = t_vmin_final + frac * (t_vmax_final - t_vmin_final)
                     # prefer integer-looking labels for amplitude (e.g. 0, 4)
-                    if abs(tick_val - round(tick_val)) < 1e-6:
-                        lbl = str(int(round(tick_val)))
+                    if abs(timeline_val - round(timeline_val)) < 1e-6:
+                        timeline_lbl = str(int(round(timeline_val)))
                     else:
-                        lbl = f'{tick_val:.2f}'
-                    cv2.putText(buf, lbl, (ml + pw + 8, tick_y + 4),
+                        timeline_lbl = f'{timeline_val:.2f}'
+                    cv2.putText(buf, timeline_lbl, (ml + pw + 8, tick_y + 4),
                                self.FONT, self.FONT_SMALL, (0, 0, 0, 255), 1, self.LINE_AA)
                 else:
                     # No timeline: show only a single '0' label at the bottom tick on the right axis
-                    if i == 0:
+                    if frac < 0.01:  # First tick
                         cv2.putText(buf, '0', (ml + pw + 8, tick_y + 4),
                                    self.FONT, self.FONT_SMALL, (0, 0, 0, 255), 1, self.LINE_AA)
                     # otherwise leave right-side blank
+            
+            # Minor ticks on time axis (x-axis) - add subdivisions between major ticks
+            if len(time_ticks) > 1:
+                for i in range(len(time_ticks) - 1):
+                    frac1 = time_ticks[i][0]
+                    frac2 = time_ticks[i + 1][0]
+                    # Add 4 minor ticks between each pair of major ticks
+                    for j in range(1, 5):
+                        minor_frac = frac1 + (frac2 - frac1) * j / 5.0
+                        tick_x = ml + int(minor_frac * pw)
+                        # draw shorter minor ticks (3 pixels instead of 5)
+                        cv2.line(buf, (tick_x, mt + ph), (tick_x, mt + ph - 3), (0, 0, 0, 255), 1, self.LINE_AA)
+                        cv2.line(buf, (tick_x, mt), (tick_x, mt + 3), (0, 0, 0, 255), 1, self.LINE_AA)
 
             # Draw traces: Z in blue, Voltage in red (left axis)
             if has_z:
@@ -926,9 +1084,13 @@ class PreviewTab(QWidget):
                     v2 = float(tl_used[i + 1]) if (i + 1) < len(tl_used) else 0.0
                     cv2.line(buf, (tx_time(t_arr[i]), py_right(v1)), (tx_time(t_arr[i + 1]), py_right(v2)), (0, 0, 255, 255), 1, self.LINE_AA)
 
-            # Right rotated label for Amplitude
+            # Right rotated label for Amplitude: center vertically based on text size
             try:
-                self._draw_rotated_text(buf, 'Amplitude (Vpp)', ml + pw + 40, mt + ph // 2 - 20, color=red, rotate_angle=90)
+                ts = cv2.getTextSize('Amplitude (Vpp)', self.FONT, self.FONT_LABEL, self.LINE_THICKNESS)[0]
+                # when rotated 90deg, the rotated height equals the text width + padding (text_buf width = text_size[0] + 10)
+                rotated_h = ts[0] + 10
+                y_pos = int(mt + ph // 2 - rotated_h // 2)
+                self._draw_rotated_text(buf, 'Amplitude (Vpp)', ml + pw + 40, y_pos, color=red, rotate_angle=90)
             except Exception:
                 pass
         else:

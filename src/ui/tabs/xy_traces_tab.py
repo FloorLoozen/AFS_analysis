@@ -7,7 +7,6 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QPalette
 import numpy as np
-from pathlib import Path
 
 from src.analysis import BeadTracker, detect_beads_auto
 from src.utils.tracking_io import TrackingDataIO
@@ -59,7 +58,7 @@ class XYTracesTab(QWidget):
     def _init_ui(self):
         """Initialize the user interface matching AFS_acquisition style."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 24, 8, 8)
+        layout.setContentsMargins(8, 16, 8, 8)
         layout.setSpacing(10)
         
         # Settings group matching AFS style

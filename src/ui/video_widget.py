@@ -2,15 +2,15 @@
 
 from typing import Optional, Dict, List, Tuple
 from PyQt5.QtWidgets import (
-    QGroupBox, QVBoxLayout, QHBoxLayout, QPushButton,
-    QSlider, QLabel, QFileDialog, QFrame, QSizePolicy
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+    QSlider, QLabel, QFrame, QSizePolicy
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QPoint
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QFont, QMouseEvent
 import numpy as np
 import cv2
 
-from src.utils.video_controller import VideoController
+from src.ui.video_controller_qt import VideoController
 from src.utils.video_loader import VideoLoader
 from src.utils.frame_processor import FrameProcessor
 
@@ -30,7 +30,7 @@ class ClickableLabel(QLabel):
         super().mousePressEvent(ev)
 
 
-class VideoWidget(QGroupBox):
+class VideoWidget(QWidget):
     """Widget for video playback with play, pause, stop controls.
     
     This is a thin UI layer that uses core.video_controller for all business logic.
@@ -42,7 +42,7 @@ class VideoWidget(QGroupBox):
 
     def __init__(self):
         """Initialize video widget."""
-        super().__init__("Video Player")
+        super().__init__()
         
         # Controller handles all business logic
         self.controller = VideoController()
@@ -68,7 +68,7 @@ class VideoWidget(QGroupBox):
     def _init_ui(self):
         """Initialize the user interface."""
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(5, 15, 5, 5)
+        main_layout.setContentsMargins(0, 0, 0, 0)
         
         # Create video frame with consistent styling
         video_frame = self._create_video_frame()
@@ -113,11 +113,6 @@ class VideoWidget(QGroupBox):
         controls_layout.setSpacing(8)
         controls_layout.setContentsMargins(0, 2, 0, 0)
         
-        self.open_button = QPushButton("Open Video")
-        self.open_button.setFixedWidth(100)
-        self.open_button.clicked.connect(self.open_video_dialog)
-        controls_layout.addWidget(self.open_button)
-        
         self.play_button = QPushButton("▶️ Play")
         self.play_button.setFixedWidth(80)
         self.play_button.clicked.connect(self._on_play_button_clicked)
@@ -140,18 +135,6 @@ class VideoWidget(QGroupBox):
         layout.addLayout(controls_layout)
         
         return frame
-
-    def open_video_dialog(self):
-        """Open file dialog to select HDF5 file."""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Open HDF5 File",
-            "",
-            "HDF5 Files (*.hdf5 *.h5);;All Files (*.*)"
-        )
-        
-        if file_path:
-            self.load_video(file_path)
 
     def load_video(self, file_path):
         """Load HDF5 video file."""

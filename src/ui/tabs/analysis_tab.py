@@ -1,7 +1,8 @@
 """Analysis tab for general analysis tools."""
 
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QApplication
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QPalette
 
 
 class AnalysisTab(QWidget):
@@ -15,6 +16,14 @@ class AnalysisTab(QWidget):
     
     def _init_ui(self):
         """Initialize the user interface."""
+        # Match application background
+        app = QApplication.instance()
+        if app:
+            pal = self.palette()
+            pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
+            self.setPalette(pal)
+            self.setAutoFillBackground(True)
+        
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 24, 8, 8)
         

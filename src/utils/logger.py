@@ -1,7 +1,6 @@
 """Simple logging utility for AFS Analysis."""
 
 import sys
-from datetime import datetime
 from typing import Optional
 
 

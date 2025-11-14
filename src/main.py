@@ -5,7 +5,6 @@ Simple video analysis application with PyQt5 interface.
 """
 
 import sys
-import os
 from pathlib import Path
 
 
