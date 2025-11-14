@@ -323,6 +323,13 @@ class XYTracesTab(QWidget):
                 self._update_status(f"Loaded {len(beads_data)} beads - Complete", "")
             else:
                 self._update_status(f"Loaded {len(beads_data)} beads", f"{num_tracked}/{total_frames} frames")
+
+            # Immediately update Preview tab with the loaded tracking so user doesn't need to press Start
+            try:
+                self._update_preview_tab()
+            except Exception:
+                # Don't prevent load success if preview update fails; log and continue
+                Logger.warning("Failed to update Preview tab after loading tracking", "XY_TAB")
             
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load:\n{str(e)}")

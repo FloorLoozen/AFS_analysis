@@ -158,6 +158,18 @@ class PreviewTab(QWidget):
         self.tracked_beads = {}
         self.count_label.setText("0 beads loaded")
         self.select_all.setChecked(False)
+        # Also clear plots and timeline state so old graphs are not shown
+        try:
+            self.xy_label.clear()
+            self.time_xy_label.clear()
+            self.time_zv_label.clear()
+        except Exception:
+            pass
+
+        # Reset shared timeline and function generator data
+        self.shared_times = None
+        self.function_generator_timeline = None
+        self._timeline_events = None
 
     def load_tracking_data(self, tracking_data: Dict):
         """Load bead tracking data.
