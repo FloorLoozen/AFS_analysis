@@ -586,15 +586,17 @@ class PreviewTab(QWidget):
 
             # X ticks (bottom and top)
             tick_x = ox + int(frac * plot_size)
-            cv2.line(buf, (tick_x, oy + plot_size), (tick_x, oy + plot_size + 5), (0, 0, 0, 255), 1, self.LINE_AA)
-            cv2.line(buf, (tick_x, oy), (tick_x, oy - 5), (0, 0, 0, 255), 1, self.LINE_AA)
+            # draw ticks inward (into the plot) instead of outward
+            cv2.line(buf, (tick_x, oy + plot_size), (tick_x, oy + plot_size - 5), (0, 0, 0, 255), 1, self.LINE_AA)
+            cv2.line(buf, (tick_x, oy), (tick_x, oy + 5), (0, 0, 0, 255), 1, self.LINE_AA)
             cv2.putText(buf, f'{val:.0f}', (tick_x - 12, oy + plot_size + 20), self.FONT, self.FONT_TICK,
                         (0, 0, 0, 255), 1, self.LINE_AA)
 
             # Y ticks (left and right)
             tick_y = int(oy + (1 - frac) * plot_size)
-            cv2.line(buf, (ox - 5, tick_y), (ox, tick_y), (0, 0, 0, 255), 1, self.LINE_AA)
-            cv2.line(buf, (ox + plot_size, tick_y), (ox + plot_size + 5, tick_y), (0, 0, 0, 255), 1, self.LINE_AA)
+            # draw ticks inward (into the plot)
+            cv2.line(buf, (ox, tick_y), (ox + 5, tick_y), (0, 0, 0, 255), 1, self.LINE_AA)
+            cv2.line(buf, (ox + plot_size, tick_y), (ox + plot_size - 5, tick_y), (0, 0, 0, 255), 1, self.LINE_AA)
             # Left-side numbers: moved slightly further left for clarity
             cv2.putText(buf, f'{val:.0f}', (ox - 36, tick_y + 5), self.FONT, self.FONT_TICK, (0, 0, 0, 255), 1,
                         self.LINE_AA)
@@ -688,15 +690,17 @@ class PreviewTab(QWidget):
             frac = i / 4.0
             # Time ticks (bottom and top)
             tick_x = ml + int(frac * pw)
-            cv2.line(buf, (tick_x, mt + ph), (tick_x, mt + ph + 5), (0, 0, 0, 255), 1, self.LINE_AA)
-            cv2.line(buf, (tick_x, mt), (tick_x, mt - 5), (0, 0, 0, 255), 1, self.LINE_AA)
+            # draw ticks inward into the plot area
+            cv2.line(buf, (tick_x, mt + ph), (tick_x, mt + ph - 5), (0, 0, 0, 255), 1, self.LINE_AA)
+            cv2.line(buf, (tick_x, mt), (tick_x, mt + 5), (0, 0, 0, 255), 1, self.LINE_AA)
             cv2.putText(buf, f'{tmin + frac * (tmax - tmin):.1f}', (tick_x - 12, mt + ph + 22),
                        self.FONT, self.FONT_SMALL, (0, 0, 0, 255), 1, self.LINE_AA)
 
             # Value ticks (left and right)
             tick_y = mt + int((1 - frac) * ph)
-            cv2.line(buf, (ml - 5, tick_y), (ml, tick_y), (0, 0, 0, 255), 1, self.LINE_AA)
-            cv2.line(buf, (ml + pw, tick_y), (ml + pw + 5, tick_y), (0, 0, 0, 255), 1, self.LINE_AA)
+            # draw ticks inward into the plot area
+            cv2.line(buf, (ml, tick_y), (ml + 5, tick_y), (0, 0, 0, 255), 1, self.LINE_AA)
+            cv2.line(buf, (ml + pw, tick_y), (ml + pw - 5, tick_y), (0, 0, 0, 255), 1, self.LINE_AA)
             # left-side numbers: move a couple pixels further left
             cv2.putText(buf, f'{vmin + frac * v_range:.0f}', (ml - 28, tick_y + 4),
                        self.FONT, self.FONT_SMALL, (0, 0, 0, 255), 1, self.LINE_AA)
@@ -867,14 +871,16 @@ class PreviewTab(QWidget):
             for i in range(5):
                 frac = i / 4.0
                 tick_x = ml + int(frac * pw)
-                cv2.line(buf, (tick_x, mt + ph), (tick_x, mt + ph + 5), (0, 0, 0, 255), 1, self.LINE_AA)
-                cv2.line(buf, (tick_x, mt), (tick_x, mt - 5), (0, 0, 0, 255), 1, self.LINE_AA)
+                # draw time ticks inward
+                cv2.line(buf, (tick_x, mt + ph), (tick_x, mt + ph - 5), (0, 0, 0, 255), 1, self.LINE_AA)
+                cv2.line(buf, (tick_x, mt), (tick_x, mt + 5), (0, 0, 0, 255), 1, self.LINE_AA)
                 cv2.putText(buf, f'{tmin + frac * (tmax - tmin):.1f}', (tick_x - 12, mt + ph + 22),
                            self.FONT, self.FONT_SMALL, (0, 0, 0, 255), 1, self.LINE_AA)
 
                 tick_y = mt + int((1 - frac) * ph)
-                cv2.line(buf, (ml - 5, tick_y), (ml, tick_y), (0, 0, 0, 255), 1, self.LINE_AA)
-                cv2.line(buf, (ml + pw, tick_y), (ml + pw + 5, tick_y), (0, 0, 0, 255), 1, self.LINE_AA)
+                # draw value ticks inward
+                cv2.line(buf, (ml, tick_y), (ml + 5, tick_y), (0, 0, 0, 255), 1, self.LINE_AA)
+                cv2.line(buf, (ml + pw, tick_y), (ml + pw - 5, tick_y), (0, 0, 0, 255), 1, self.LINE_AA)
                 # left-side numbers
                 cv2.putText(buf, f'{vmin_sym + frac * v_range:.1f}', (ml - 28, tick_y + 4),
                            self.FONT, self.FONT_SMALL, (0, 0, 0, 255), 1, self.LINE_AA)
