@@ -18,7 +18,7 @@ class InfoTab(QWidget):
         super().__init__()
         # Ensure this tab uses the application's Window palette color so it matches other tabs
         app = QApplication.instance()
-        if app is not None:
+        if isinstance(app, QApplication):
             pal = self.palette()
             pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))  # type: ignore
             self.setPalette(pal)

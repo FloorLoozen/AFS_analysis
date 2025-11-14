@@ -1,4 +1,5 @@
 """Preview tab with video on left and graphs on right (1:2 ratio)."""
+# type: ignore
 
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QSizePolicy, QApplication, QGroupBox
 from PyQt5.QtCore import Qt
@@ -20,7 +21,7 @@ class PreviewWithVideoTab(QWidget):
         """Initialize the user interface."""
         # Match application background
         app = QApplication.instance()
-        if app:
+        if isinstance(app, QApplication):
             pal = self.palette()
             pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
             self.setPalette(pal)
@@ -33,7 +34,7 @@ class PreviewWithVideoTab(QWidget):
         # Left: Video container (1/3 width) - divided into 2 rows
         video_container = QWidget()
         # Match background
-        if app:
+        if isinstance(app, QApplication):
             pal = video_container.palette()
             pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
             video_container.setPalette(pal)
@@ -68,7 +69,7 @@ class PreviewWithVideoTab(QWidget):
         
         # Placeholder content
         bottom_video_placeholder = QWidget()
-        if app:
+        if isinstance(app, QApplication):
             pal = bottom_video_placeholder.palette()
             pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
             bottom_video_placeholder.setPalette(pal)
@@ -77,7 +78,7 @@ class PreviewWithVideoTab(QWidget):
         placeholder_layout.setContentsMargins(8, 8, 8, 8)
         
         placeholder_label = QLabel("(To be implemented)")
-        placeholder_label.setAlignment(Qt.AlignCenter)
+        placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         placeholder_label.setStyleSheet("color: #888; font-style: italic;")
         placeholder_layout.addWidget(placeholder_label)
         

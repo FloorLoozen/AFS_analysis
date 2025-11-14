@@ -18,7 +18,7 @@ class AnalysisTab(QWidget):
         """Initialize the user interface."""
         # Match application background
         app = QApplication.instance()
-        if app:
+        if isinstance(app, QApplication):
             pal = self.palette()
             pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
             self.setPalette(pal)
@@ -29,7 +29,7 @@ class AnalysisTab(QWidget):
         
         # Placeholder content
         label = QLabel("Analysis\n\n(To be implemented)")
-        label.setAlignment(Qt.AlignCenter)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setStyleSheet("color: #888; font-style: italic;")
         layout.addWidget(label)
         

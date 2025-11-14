@@ -20,7 +20,7 @@ class ZTracesTab(QWidget):
         
         # Placeholder content
         label = QLabel("Z Traces\n\n(To be implemented)")
-        label.setAlignment(Qt.AlignCenter)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setStyleSheet("color: #888; font-style: italic;")
         layout.addWidget(label)
         

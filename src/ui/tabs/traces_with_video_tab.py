@@ -16,7 +16,7 @@ class ZTracesPlaceholder(QWidget):
         super().__init__()
         # Match application background
         app = QApplication.instance()
-        if app:
+        if isinstance(app, QApplication):
             pal = self.palette()
             pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
             self.setPalette(pal)
@@ -46,7 +46,7 @@ class TracesWithVideoTab(QWidget):
         """Initialize the user interface."""
         # Match application background
         app = QApplication.instance()
-        if app:
+        if isinstance(app, QApplication):
             pal = self.palette()
             pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
             self.setPalette(pal)
@@ -59,7 +59,7 @@ class TracesWithVideoTab(QWidget):
         # Left: Video container (1/3 width) - divided into 2 rows
         video_container = QWidget()
         # Match background
-        if app:
+        if isinstance(app, QApplication):
             pal = video_container.palette()
             pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
             video_container.setPalette(pal)
@@ -100,7 +100,7 @@ class TracesWithVideoTab(QWidget):
         
         # Placeholder content
         bottom_video_placeholder = QWidget()
-        if app:
+        if isinstance(app, QApplication):
             pal = bottom_video_placeholder.palette()
             pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
             bottom_video_placeholder.setPalette(pal)
@@ -109,7 +109,7 @@ class TracesWithVideoTab(QWidget):
         placeholder_layout.setContentsMargins(8, 8, 8, 8)
         
         placeholder_label = QLabel("(To be implemented)")
-        placeholder_label.setAlignment(Qt.AlignCenter)
+        placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         placeholder_label.setStyleSheet("color: #888; font-style: italic;")
         placeholder_layout.addWidget(placeholder_label)
         
@@ -123,7 +123,7 @@ class TracesWithVideoTab(QWidget):
         # Right: XY and Z traces side-by-side in 2 columns (2/3 width)
         right_widget = QWidget()
         # Match background
-        if app:
+        if isinstance(app, QApplication):
             pal = right_widget.palette()
             pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
             right_widget.setPalette(pal)
