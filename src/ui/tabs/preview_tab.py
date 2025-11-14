@@ -8,7 +8,7 @@ Provides a bead list and three plots:
 
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
-    QLabel, QGroupBox, QSplitter, QCheckBox
+    QLabel, QGroupBox, QSplitter, QCheckBox, QSizePolicy
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPalette, QPixmap, QImage
@@ -46,6 +46,8 @@ class PreviewTab(QWidget):
         # Shared timeline (seconds) and optional function generator values (global)
         self.shared_times: Optional[np.ndarray] = None
         self.function_generator_timeline: Optional[np.ndarray] = None
+        # If timeline is provided as event rows, store them here as (times, amps, enabled)
+        self._timeline_events = None
         self._init_ui()
 
     def _setup_palette(self):
@@ -92,20 +94,22 @@ class PreviewTab(QWidget):
 
     def _create_plots_panel(self) -> QGroupBox:
         """Create panel with three equal-height plots."""
-        gb = QGroupBox()
+        gb = QGroupBox("Movement Beads")
         layout = QVBoxLayout(gb)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
-        
+
         # Create three plot labels
         self.xy_label = self._create_plot_label(150)
         self.time_xy_label = self._create_plot_label(150)
         self.time_zv_label = self._create_plot_label(150)
-        
+
+        # Add widgets: top plot, small spacer, middle plot, bottom plot
         layout.addWidget(self.xy_label, 1)
+        layout.addSpacing(30)
         layout.addWidget(self.time_xy_label, 1)
         layout.addWidget(self.time_zv_label, 1)
-        
+
         return gb
     
     def _create_plot_label(self, min_height: int) -> ResizablePixmapLabel:
@@ -113,6 +117,8 @@ class PreviewTab(QWidget):
         label = ResizablePixmapLabel()
         label.setMinimumHeight(min_height)
         label.setScaledContents(False)
+        # allow layout to expand labels equally vertically
+        label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         label.resized.connect(self._on_plot_resize)
         return label
 
@@ -150,43 +156,279 @@ class PreviewTab(QWidget):
         self.select_all.setChecked(True)
 
         # Try to read a global function generator timeline from the opened HDF5
-        # (located at /raw_data/function_generator_timeline when present).
+        # Search robustly for common dataset names under /raw_data or /data.
         self.shared_times = None
         self.function_generator_timeline = None
         try:
-            if self.video_widget and hasattr(self.video_widget, 'get_hdf5_file'):
-                h5 = self.video_widget.get_hdf5_file()
-                if h5 is not None:
-                    # Look under raw_data then data for backward compatibility
-                    data_group = None
-                    if 'raw_data' in h5:
-                        data_group = h5['raw_data']
-                    elif 'data' in h5:
-                        data_group = h5['data']
-
-                    if data_group is not None and 'function_generator_timeline' in data_group:
-                        ds = data_group['function_generator_timeline'][:]
-                        # Dataset can be either 1D (values per frame) or Nx2 (time, value)
-                        if ds is not None and ds.size > 0:
-                            arr = np.array(ds)
-                            if arr.ndim == 1:
-                                # treat as values per frame -> create time axis from video fps
-                                self.function_generator_timeline = arr.astype(float)
-                                fps = 1.0
-                                try:
-                                    if self.video_widget and hasattr(self.video_widget, 'controller'):
-                                        fps = float(self.video_widget.controller.get_fps())
-                                except Exception:
-                                    pass
-                                self.shared_times = np.arange(len(arr)) / max(1.0, fps)
-                            elif arr.ndim == 2 and arr.shape[1] >= 2:
-                                # assume columns are (time, value)
-                                self.shared_times = arr[:, 0].astype(float)
-                                self.function_generator_timeline = arr[:, 1].astype(float)
+            self._load_function_generator_timeline()
         except Exception:
             # Non-fatal: timeline optional
             self.shared_times = None
             self.function_generator_timeline = None
+
+    def _load_function_generator_timeline(self):
+        """Attempt to locate and load a function-generator timeline dataset from the HDF5 file.
+
+        This is separated out so plotting can call it lazily if the file wasn't available
+        at the time tracking data was loaded.
+        """
+        # reset
+        self.shared_times = None
+        self.function_generator_timeline = None
+        if not (self.video_widget and hasattr(self.video_widget, 'get_hdf5_file')):
+            return
+        h5 = self.video_widget.get_hdf5_file()
+        if h5 is None:
+            return
+
+        # prefer raw_data, fall back to data
+        data_group = None
+        if 'raw_data' in h5:
+            data_group = h5['raw_data']
+        elif 'data' in h5:
+            data_group = h5['data']
+
+        candidate = None
+        if data_group is not None:
+            if 'function_generator_timeline' in data_group:
+                candidate = 'function_generator_timeline'
+            else:
+                for k in data_group.keys():
+                    kl = k.lower()
+                    if 'function' in kl and ('timeline' in kl or 'time' in kl or 'fg' in kl or 'func' in kl):
+                        candidate = k
+                        break
+
+        if candidate is None:
+            for k in h5.keys():
+                kl = k.lower()
+                if 'function' in kl and ('timeline' in kl or 'time' in kl or 'fg' in kl or 'func' in kl):
+                    candidate = k
+                    break
+
+        if candidate is None:
+            return
+
+        # read dataset
+        if data_group is not None and candidate in data_group:
+            ds = data_group[candidate][:]
+        else:
+            ds = h5[candidate][:]
+
+        arr = np.array(ds)
+        print(f"[PreviewTab] found candidate timeline dataset '{candidate}' with shape {arr.shape} dtype={arr.dtype}")
+
+        # If dataset is stored as text lines (CSV-like), parse it here
+        if arr.dtype.kind in ('S', 'U', 'O') and arr.ndim == 1:
+            try:
+                lines = [x.decode('utf-8') if isinstance(x, (bytes, bytearray)) else str(x) for x in arr]
+                lines = [ln.strip() for ln in lines if ln is not None and str(ln).strip() != '']
+                if len(lines) >= 2 and (',' in lines[0]):
+                    header = [h.strip() for h in lines[0].split(',')]
+                    cols = {h: [] for h in header}
+                    for ln in lines[1:]:
+                        parts = [p.strip() for p in ln.split(',')]
+                        if len(parts) < len(header):
+                            continue
+                        for i, h in enumerate(header):
+                            cols[h].append(parts[i])
+
+                    def _to_float_list(key):
+                        if key in cols:
+                            out = []
+                            for v in cols[key]:
+                                try:
+                                    out.append(float(v))
+                                except Exception:
+                                    out.append(np.nan)
+                            return np.array(out, dtype=float)
+                        return None
+
+                    def _to_int_list(key):
+                        if key in cols:
+                            out = []
+                            for v in cols[key]:
+                                try:
+                                    out.append(int(float(v)))
+                                except Exception:
+                                    out.append(0)
+                            return np.array(out, dtype=int)
+                        return None
+
+                    times_col = _to_float_list('timestamp') or _to_float_list('time') or _to_float_list('t')
+                    amp_col = _to_float_list('amplitude_vpp') or _to_float_list('amplitude') or _to_float_list('vpp')
+                    enabled_col = _to_int_list('output_enabled') or _to_int_list('enabled')
+
+                    if times_col is not None:
+                        print(f"[PreviewTab] parsed CSV-like timeline: {len(times_col)} rows, fields={header}")
+                        parsed = np.empty(len(times_col), dtype=[('time', float), ('amp', float), ('enabled', int)])
+                        parsed['time'] = times_col
+                        parsed['amp'] = amp_col if amp_col is not None else np.zeros(len(times_col), dtype=float)
+                        parsed['enabled'] = enabled_col if enabled_col is not None else np.zeros(len(times_col), dtype=int)
+                        arr = parsed
+            except Exception as e:
+                print(f"[PreviewTab] failed parsing text timeline: {e}")
+
+        # determine video/frame count and fps if available
+        n_frames = None
+        fps = 1.0
+        try:
+            if self.video_widget and hasattr(self.video_widget, 'controller'):
+                n_frames = int(self.video_widget.controller.get_total_frames())
+                fps = float(self.video_widget.controller.get_fps())
+        except Exception:
+            n_frames = None
+
+        # If arr now has named fields
+        if getattr(arr, 'dtype', None) is not None and getattr(arr.dtype, 'names', None):
+            # Robust field selection for structured timeline datasets. Prefer explicit names
+            field_names = list(arr.dtype.names)
+            lname_map = {n.lower(): n for n in field_names}
+
+            def pick_field(preds, default=None):
+                for n in field_names:
+                    nl = n.lower()
+                    for p in preds:
+                        if p in nl:
+                            return n
+                return default
+
+            tname = pick_field(['timestamp', 'time', 't'], field_names[0])
+            aname = pick_field(['amplitude', 'vpp', 'amp'])
+            ename = pick_field(['output_enabled', 'output', 'enabled', 'enable', 'on'])
+
+            # prefer exact common names if present
+            if 'amplitude_vpp' in lname_map:
+                aname = lname_map['amplitude_vpp']
+            if 'output_enabled' in lname_map:
+                ename = lname_map['output_enabled']
+
+            print(f"[PreviewTab] structured fields detected: t={tname}, amp={aname}, enabled={ename}")
+
+            times_col = np.array(arr[tname], dtype=float) if tname is not None else np.arange(len(arr), dtype=float)
+            amp_col = None
+            if aname is not None:
+                try:
+                    amp_col = np.array(arr[aname], dtype=float)
+                except Exception:
+                    amp_col = None
+            enabled_col = None
+            if ename is not None:
+                try:
+                    enabled_col = np.array(arr[ename], dtype=int)
+                except Exception:
+                    # boolean-like
+                    enabled_col = np.array(arr[ename], dtype=bool).astype(int)
+
+            # Fallbacks if amplitude or enabled not found
+            if amp_col is None:
+                # try common numeric fields that are not the timestamp
+                for n in field_names:
+                    if n == tname:
+                        continue
+                    try:
+                        cand = np.array(arr[n], dtype=float)
+                        # pick a field that doesn't equal the timestamps
+                        if not np.allclose(cand, times_col):
+                            amp_col = cand
+                            aname = n
+                            break
+                    except Exception:
+                        continue
+            if enabled_col is None:
+                # try to infer a boolean-like field
+                for n in field_names:
+                    if n == tname or n == aname:
+                        continue
+                    vals = arr[n]
+                    if vals.dtype == np.bool_ or vals.dtype == bool:
+                        enabled_col = np.array(vals, dtype=int)
+                        ename = n
+                        break
+
+            if amp_col is None:
+                amp_col = np.zeros_like(times_col)
+
+            # Debug: show small sample of parsed fields
+            try:
+                print(f"[PreviewTab] parsed timeline fields sample: times={times_col[:6]}, amp={amp_col[:6]}, enabled={enabled_col[:6]}")
+            except Exception:
+                pass
+            
+            if enabled_col is None:
+                enabled_col = np.zeros(len(times_col), dtype=int)
+
+            # Now build per-frame timeline if we have frame info, else keep event times
+            if n_frames is not None:
+                t_arr = np.arange(n_frames) / max(1.0, fps)
+                tl = np.full(len(t_arr), np.nan, dtype=float)
+                cur_amp = 0.0
+                cur_enabled = 0
+                ev_idx = 0
+                order = np.argsort(times_col)
+                times_sorted = times_col[order]
+                amp_sorted = amp_col[order]
+                enabled_sorted = enabled_col[order]
+                for i, t in enumerate(t_arr):
+                    while ev_idx < len(times_sorted) and times_sorted[ev_idx] <= t:
+                        cur_amp = amp_sorted[ev_idx] if amp_col is not None else cur_amp
+                        cur_enabled = int(enabled_sorted[ev_idx]) if enabled_col is not None else cur_enabled
+                        ev_idx += 1
+                    tl[i] = cur_amp if cur_enabled else 0.0
+                self.function_generator_timeline = tl
+                self.shared_times = t_arr
+                # also keep raw events so we can re-sample if needed
+                self._timeline_events = (times_sorted, amp_sorted, enabled_sorted)
+                print(f"[PreviewTab] structured timeline converted to per-frame step function; frames={len(tl)}; amp_unique={np.unique(amp_sorted)}")
+            else:
+                # no frame info: use event times as shared times
+                self.shared_times = times_col
+                # store events for later sampling into plot time axis
+                order = np.argsort(times_col)
+                times_sorted = times_col[order]
+                amp_sorted = amp_col[order]
+                enabled_sorted = enabled_col[order]
+                self._timeline_events = (times_sorted, amp_sorted, enabled_sorted)
+                # keep a compact representation too (amplitude only at event times)
+                self.function_generator_timeline = (amp_sorted * enabled_sorted.astype(float))
+                print(f"[PreviewTab] structured timeline loaded as events; events={len(times_col)}; amp_unique={np.unique(amp_sorted)}")
+            return
+
+        # If 2D with two columns -> (time, value)
+        if arr.ndim == 2 and arr.shape[1] >= 2:
+            # Nx2: assume first column is time (s), second is amplitude (V)
+            self.shared_times = arr[:, 0].astype(float)
+            self.function_generator_timeline = arr[:, 1].astype(float)
+            print(f"[PreviewTab] using timeline as (time, value) pairs; times len={len(self.shared_times)}")
+            return
+
+        # 1D numeric arrays
+        if arr.ndim == 1:
+            if n_frames is not None and len(arr) == n_frames:
+                self.function_generator_timeline = arr.astype(float)
+                self.shared_times = np.arange(len(arr)) / max(1.0, fps)
+                print(f"[PreviewTab] using timeline as one value per frame; frames={n_frames}, fps={fps}")
+                return
+            if n_frames is not None and len(arr) > n_frames:
+                chunk_size = int(np.ceil(len(arr) / n_frames))
+                values = []
+                for i in range(n_frames):
+                    start = i * chunk_size
+                    end = min(len(arr), start + chunk_size)
+                    segment = arr[start:end]
+                    if segment.size > 0:
+                        vpp = float(np.nanmax(segment) - np.nanmin(segment))
+                        values.append(vpp)
+                    else:
+                        values.append(np.nan)
+                self.function_generator_timeline = np.array(values, dtype=float)
+                self.shared_times = np.arange(len(values)) / max(1.0, fps)
+                print(f"[PreviewTab] high-rate waveform -> computed Vpp per frame; out_len={len(values)}, fps={fps}")
+                return
+
+        # fallback: couldn't interpret dataset
+        self.shared_times = None
+        self.function_generator_timeline = None
 
     def _on_bead_selected(self, current, previous=None):
         """Handle bead selection change."""
@@ -203,30 +445,19 @@ class PreviewTab(QWidget):
 
     def _on_plot_resize(self):
         """Redraw plots on resize."""
-        # Compute target height: keep top plot as reference and slightly reduce lower two
+        # Let the layout distribute the available vertical space equally.
+        # Just trigger redraws for the current selection.
         try:
-            panel = self.xy_label.parentWidget()  # the QGroupBox containing the plots
-            panel_h = panel.height() if panel is not None else self.height()
-            # divide into 3 rows; keep xy plot as reference and make lower two a bit smaller
-            h_third = max(20, int(panel_h / 3))
-            # leave ~6% extra space for axis labels by making lower plots slightly smaller
-            lower_factor = 0.94
-            small = max(18, int(h_third * lower_factor))
-
-            # Apply fixed height to each plot label
-            self.xy_label.setFixedHeight(h_third)
-            self.xy_label.setMinimumHeight(h_third)
-            self.time_xy_label.setFixedHeight(small)
-            self.time_xy_label.setMinimumHeight(small)
-            self.time_zv_label.setFixedHeight(small)
-            self.time_zv_label.setMinimumHeight(small)
+            current = self.bead_list.currentItem()
+            if current:
+                self._update_plots_for_bead(current.data(Qt.UserRole))
+            else:
+                # Redraw empty placeholders if nothing selected
+                self.xy_label.clear()
+                self.time_xy_label.clear()
+                self.time_zv_label.clear()
         except Exception:
-            # If anything goes wrong, fall back to previous behaviour (no crash)
             pass
-
-        current = self.bead_list.currentItem()
-        if current:
-            self._update_plots_for_bead(current.data(Qt.UserRole))
 
     def _update_plots_for_bead(self, bead_id):
         """Update all plots for selected bead."""
@@ -321,11 +552,15 @@ class PreviewTab(QWidget):
         oy = mt + (h - mt - mb - plot_size) // 2
         cx, cy = ox + plot_size // 2, oy + plot_size // 2
 
-        # Scale data to fit (centered around 0) and add padding so data
-        # doesn't touch the frame
+        # Scale data to fit (centered around 0) and add padding so data doesn't touch the frame
+        # Store computed range for use in time-series plot to ensure matching axes
         padding_factor = 1.15
         max_extent = max(np.nanmax(np.abs(xs)), np.nanmax(np.abs(ys)), 1e-6)
-        total_span = max_extent * 2 * padding_factor
+        max_extent_padded = max_extent * padding_factor
+        # Store for shared use with time plot
+        self._xy_vmin = -max_extent_padded
+        self._xy_vmax = max_extent_padded
+        total_span = max_extent_padded * 2
         total_span = max(total_span, 1.0)
         scale = plot_size / total_span
 
@@ -341,7 +576,7 @@ class PreviewTab(QWidget):
         cv2.putText(buf, 'X (px)', (ox + plot_size // 2 - 30, oy + plot_size + 45), self.FONT, self.FONT_LABEL,
                     (0, 0, 0, 255), 1, self.LINE_AA)
         # Move Y label: match the middle-plot left-label distance (use same offset)
-        self._draw_rotated_text(buf, 'Y (px)', max(0, ox - 56), cy - 20,
+        self._draw_rotated_text(buf, 'Y (px)', max(0, ox - 66), cy - 20,
                                 font_scale=self.FONT_LABEL, color=(0, 0, 0, 255), rotate_angle=90)
 
         # Tick marks and numbers
@@ -405,15 +640,21 @@ class PreviewTab(QWidget):
         ml, mt, mr, mb = 140, 20, 140, 90
         pw, ph = w - ml - mr, h - mt - mb
 
-        # Data ranges: include zero and make symmetric around 0 so 0 is always shown
-        # add small padding around data so it doesn't sit on the axes
-        pad = 1.08
+        # Data ranges: use shared limits from XY plot if available, otherwise compute
+        # If XY plot was drawn first, reuse its limits for consistency
+        if hasattr(self, '_xy_vmin') and hasattr(self, '_xy_vmax'):
+            vmin = self._xy_vmin
+            vmax = self._xy_vmax
+        else:
+            # Compute independently with padding
+            pad = 1.15
+            vmin_raw = min(xs.min(), ys.min())
+            vmax_raw = max(xs.max(), ys.max())
+            max_abs = max(abs(vmin_raw), abs(vmax_raw), 1e-6) * pad
+            vmin = -max_abs
+            vmax = max_abs
+        
         tmin, tmax = 0.0, times.max() if times.size else 1.0
-        vmin_raw = min(xs.min(), ys.min())
-        vmax_raw = max(xs.max(), ys.max())
-        max_abs = max(abs(vmin_raw), abs(vmax_raw), 1e-6) * pad
-        vmin = -max_abs
-        vmax = max_abs
         v_range = vmax - vmin
 
         def tx(t):
@@ -486,6 +727,13 @@ class PreviewTab(QWidget):
 
     def _draw_time_zv(self, z: List[float], voltage: List[float]):
         """Draw Z and Voltage vs time (combined plot)."""
+        # Ensure timeline loaded (lazy load if video/HDF5 became available after tracking load)
+        if self.function_generator_timeline is None:
+            try:
+                self._load_function_generator_timeline()
+            except Exception:
+                pass
+
         z = np.array(z, dtype=float) if z else np.array([])
         voltage = np.array(voltage, dtype=float) if voltage else np.array([])
         
@@ -547,7 +795,7 @@ class PreviewTab(QWidget):
                 all_vals.extend(voltage[~np.isnan(voltage)])
 
             if all_vals:
-                pad = 1.08
+                pad = 1.15
                 vmin = min(all_vals)
                 vmax = max(all_vals)
                 max_abs = max(abs(vmin), abs(vmax), 1e-6) * pad
@@ -565,22 +813,52 @@ class PreviewTab(QWidget):
 
             # Timeline right-axis mapping if present
             if has_timeline:
-                tl = np.array(self.function_generator_timeline, dtype=float)
-                # align length
-                if len(tl) >= len(t_arr):
-                    tl_used = tl[:len(t_arr)]
+                # Prefer reconstructing from raw events
+                events = getattr(self, '_timeline_events', None)
+                tl_used = None
+                if events:
+                    # Re-sample raw events into the plotting time axis
+                    times_sorted, amp_sorted, enabled_sorted = events
+                    print(f"[PreviewTab] resampling events into plot t_arr: times={times_sorted}, amp={amp_sorted}, enabled={enabled_sorted}")
+                    tl_ev = np.full(len(t_arr), 0.0, dtype=float)
+                    ev_idx = 0
+                    cur_amp = 0.0
+                    cur_enabled = 0
+                    for i, t in enumerate(t_arr):
+                        while ev_idx < len(times_sorted) and times_sorted[ev_idx] <= t:
+                            cur_amp = float(amp_sorted[ev_idx])
+                            cur_enabled = int(enabled_sorted[ev_idx])
+                            ev_idx += 1
+                        tl_ev[i] = cur_amp if cur_enabled else 0.0
+                    tl_used = tl_ev
                 else:
-                    tl_used = np.full(len(t_arr), np.nan)
-                    tl_used[:len(tl)] = tl
+                    # Fallback to per-frame timeline array
+                    if self.function_generator_timeline is not None:
+                        tl = np.array(self.function_generator_timeline, dtype=float)
+                        if len(tl) >= len(t_arr):
+                            tl_used = tl[:len(t_arr)]
+                        else:
+                            tl_used = np.full(len(t_arr), 0.0)
+                            tl_used[:len(tl)] = tl
 
-                t_vmin = float(np.nanmin(tl_used)) if not np.all(np.isnan(tl_used)) else 0.0
-                t_vmax = float(np.nanmax(tl_used)) if not np.all(np.isnan(tl_used)) else 1.0
-                # pad timeline range slightly
-                pad_t = 1.08
-                t_vmin_p = t_vmin * pad_t if t_vmin <= 0 else t_vmin / pad_t
-                t_vmax_p = t_vmax * pad_t if t_vmax >= 0 else t_vmax / pad_t
-                t_vmin_final = min(t_vmin_p, t_vmax_p)
-                t_vmax_final = max(t_vmin_p, t_vmax_p)
+                # Compute visible range for right axis from event amplitudes with padding
+                events = getattr(self, '_timeline_events', None)
+                if events is not None:
+                    _, amp_sorted, _ = events
+                    amp_max = float(np.nanmax(amp_sorted)) if len(amp_sorted) else 4.0
+                    t_vmin_final = 0.0
+                    # Add 15% padding above the max amplitude
+                    t_vmax_final = float(max(1.0, np.ceil(amp_max * 1.15)))
+                    print(f"[PreviewTab] timeline amp_max={amp_max} -> axis 0..{t_vmax_final}")
+                elif tl_used is not None:
+                    t_vmin = float(np.nanmin(tl_used)) if not np.all(np.isnan(tl_used)) else 0.0
+                    t_vmax = float(np.nanmax(tl_used)) if not np.all(np.isnan(tl_used)) else 1.0
+                    t_vmin_final = 0.0
+                    # Add 15% padding above the max value
+                    t_vmax_final = float(max(1.0, np.ceil(t_vmax * 1.15)))
+                else:
+                    t_vmin_final = 0.0
+                    t_vmax_final = 1.0
 
                 def py_right(v):
                     return int(mt + ph - (v - t_vmin_final) / max((t_vmax_final - t_vmin_final), 1e-6) * ph)
@@ -603,11 +881,19 @@ class PreviewTab(QWidget):
                 # right-side: timeline scale if present, otherwise mirror left values
                 if has_timeline:
                     tick_val = t_vmin_final + frac * (t_vmax_final - t_vmin_final)
-                    cv2.putText(buf, f'{tick_val:.2f}', (ml + pw + 8, tick_y + 4),
+                    # prefer integer-looking labels for amplitude (e.g. 0, 4)
+                    if abs(tick_val - round(tick_val)) < 1e-6:
+                        lbl = str(int(round(tick_val)))
+                    else:
+                        lbl = f'{tick_val:.2f}'
+                    cv2.putText(buf, lbl, (ml + pw + 8, tick_y + 4),
                                self.FONT, self.FONT_SMALL, (0, 0, 0, 255), 1, self.LINE_AA)
                 else:
-                    cv2.putText(buf, f'{vmin_sym + frac * v_range:.1f}', (ml + pw + 8, tick_y + 4),
-                               self.FONT, self.FONT_SMALL, (0, 0, 0, 255), 1, self.LINE_AA)
+                    # No timeline: show only a single '0' label at the bottom tick on the right axis
+                    if i == 0:
+                        cv2.putText(buf, '0', (ml + pw + 8, tick_y + 4),
+                                   self.FONT, self.FONT_SMALL, (0, 0, 0, 255), 1, self.LINE_AA)
+                    # otherwise leave right-side blank
 
             # Draw traces: Z in blue, Voltage in red (left axis)
             if has_z:
@@ -620,17 +906,23 @@ class PreviewTab(QWidget):
                     if not (np.isnan(voltage[i]) or np.isnan(voltage[i + 1])):
                         cv2.line(buf, (tx_time(t_arr[i]), py_left(voltage[i])), (tx_time(t_arr[i + 1]), py_left(voltage[i + 1])), red, 1, self.LINE_AA)
 
-            # Draw timeline on right axis if present (green)
-            if has_timeline:
+            # Draw timeline on right axis if present
+            if has_timeline and tl_used is not None:
+                # Diagnostics
+                try:
+                    valid = tl_used[tl_used > 0]
+                    print(f"[PreviewTab] plotting timeline: min={float(np.min(tl_used))}, max={float(np.max(tl_used))}, unique={np.unique(tl_used)}")
+                except Exception as e:
+                    print(f"[PreviewTab] timeline diagnostics failed: {e}")
+
                 for i in range(len(t_arr) - 1):
-                    v1 = tl_used[i]
-                    v2 = tl_used[i + 1]
-                    if not (np.isnan(v1) or np.isnan(v2)):
-                        cv2.line(buf, (tx_time(t_arr[i]), py_right(v1)), (tx_time(t_arr[i + 1]), py_right(v2)), (0, 150, 0, 255), 1, self.LINE_AA)
+                    v1 = float(tl_used[i]) if i < len(tl_used) else 0.0
+                    v2 = float(tl_used[i + 1]) if (i + 1) < len(tl_used) else 0.0
+                    cv2.line(buf, (tx_time(t_arr[i]), py_right(v1)), (tx_time(t_arr[i + 1]), py_right(v2)), (0, 0, 255, 255), 1, self.LINE_AA)
 
             # Right rotated label for Amplitude
             try:
-                self._draw_rotated_text(buf, 'Amplitude', ml + pw + 40, mt + ph // 2 - 20, color=red, rotate_angle=90)
+                self._draw_rotated_text(buf, 'Amplitude (Vpp)', ml + pw + 40, mt + ph // 2 - 20, color=red, rotate_angle=90)
             except Exception:
                 pass
         else:
