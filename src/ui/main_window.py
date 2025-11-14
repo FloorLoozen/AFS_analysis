@@ -94,17 +94,21 @@ class MainWindow(QMainWindow):
         
         # Style tabs to be consistent with the rest of the UI
         self.tab_widget.setStyleSheet("""
+            /* Pane: remove full box border and keep only the top separator line */
             QTabWidget::pane {
-                border: 1px solid #b0b0b0;
+                border: none;
+                border-top: 1px solid #b0b0b0;
                 background: #f0f0f0;
                 margin-top: 0px;
                 padding: 0px;
             }
+
+            /* Tabs: remove per-tab borders so there's no outer square; keep rounded tab look
+               via background and slight margin offsets. */
             QTabBar::tab {
                 background: #d4d4d4;
                 color: #333333;
-                border: 1px solid #b0b0b0;
-                border-bottom: none;
+                border: none;
                 border-top-left-radius: 4px;
                 border-top-right-radius: 4px;
                 padding: 12px 40px;
@@ -114,6 +118,7 @@ class MainWindow(QMainWindow):
                 min-width: 120px;
                 min-height: 20px;
             }
+
             QTabBar::tab:selected {
                 background: #f0f0f0;
                 color: #000000;
@@ -121,6 +126,7 @@ class MainWindow(QMainWindow):
                 padding-bottom: 14px;
                 margin-top: 2px;
             }
+
             QTabBar::tab:hover:!selected {
                 background: #e0e0e0;
             }
