@@ -25,7 +25,7 @@ class AnalysisTab(QWidget):
             self.setAutoFillBackground(True)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 24, 8, 8)
+        layout.setContentsMargins(8, 16, 8, 8)
         
         # Placeholder content
         label = QLabel("Analysis\n\n(To be implemented)")

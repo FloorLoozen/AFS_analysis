@@ -49,7 +49,7 @@ class InfoTab(QWidget):
         # Container widget for scroll area
         scroll_widget = QWidget()
         layout = QVBoxLayout(scroll_widget)
-        layout.setContentsMargins(8, 24, 8, 8)
+        layout.setContentsMargins(8, 16, 8, 8)
         layout.setSpacing(10)
         
         # GPU/System Info Section (always visible)

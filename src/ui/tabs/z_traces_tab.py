@@ -16,7 +16,7 @@ class ZTracesTab(QWidget):
     def _init_ui(self):
         """Initialize the user interface."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 24, 8, 8)
+        layout.setContentsMargins(8, 16, 8, 8)
         
         # Placeholder content
         label = QLabel("Z Traces\n\n(To be implemented)")

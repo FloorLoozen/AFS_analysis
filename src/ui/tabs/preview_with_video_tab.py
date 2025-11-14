@@ -27,7 +27,7 @@ class PreviewWithVideoTab(QWidget):
             self.setAutoFillBackground(True)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 16, 0, 0)
         layout.setSpacing(6)
         
         # Left: Video container (1/3 width) - divided into 2 rows
@@ -44,7 +44,7 @@ class PreviewWithVideoTab(QWidget):
         video_vertical_layout.setContentsMargins(0, 0, 0, 0)
         video_vertical_layout.setSpacing(6)
         
-        # Top video container (shared main video)
+        # Top video container (main video)
         top_video_group = QGroupBox("Acquisition Movie")
         top_video_layout = QVBoxLayout(top_video_group)
         top_video_layout.setContentsMargins(4, 4, 4, 4)

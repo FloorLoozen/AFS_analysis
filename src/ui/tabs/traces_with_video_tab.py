@@ -53,7 +53,7 @@ class TracesWithVideoTab(QWidget):
             self.setAutoFillBackground(True)
         
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 10, 0, 0)
+        layout.setContentsMargins(0, 16, 0, 0)
         layout.setSpacing(6)
         
         # Left: Video container (1/3 width) - divided into 2 rows

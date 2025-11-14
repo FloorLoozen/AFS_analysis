@@ -61,7 +61,7 @@ class PreviewTab(QWidget):
     def _init_ui(self):
         """Initialize UI layout."""
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(8, 0, 8, 8)
         
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(self._create_bead_list_panel())
