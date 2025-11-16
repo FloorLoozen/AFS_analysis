@@ -88,9 +88,11 @@ class VideoWidget(QWidget):
         self.video_label.clicked.connect(self._on_video_clicked)
         self.video_label.right_clicked.connect(self._on_video_right_clicked)
         self.video_label.setAlignment(Qt.AlignCenter)  # type: ignore
-        self.video_label.setMinimumSize(640, 480)
+        # Reduce minimum size so video fits in the column layout
+        self.video_label.setMinimumSize(100, 75)  # Small minimum to allow proper scaling
         self.video_label.setStyleSheet("")
-        self.video_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # Use Ignored vertical policy to allow proper aspect ratio scaling
+        self.video_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Ignored)
         self.video_label.setScaledContents(False)  # Don't auto-scale, we handle it manually
         layout.addWidget(self.video_label, 1)
         

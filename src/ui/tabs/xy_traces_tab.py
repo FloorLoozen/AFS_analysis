@@ -599,60 +599,74 @@ class XYTracesTab(QWidget):
         if not self.video_widget:
             return
         
-        # Get parent widget (AnalysisWidget) to access other tabs
+        # Navigate up to MainWindow which has the tab_widget
+        # XYTracesTab -> XY Traces GroupBox -> TracesWithVideoTab -> MainWindow
         parent = self.parent()
-        while parent and not hasattr(parent, 'tab_widget'):
+        max_depth = 10  # Safety limit
+        depth = 0
+        while parent and depth < max_depth:
+            if hasattr(parent, 'tab_widget'):
+                break
             parent = parent.parent()
+            depth += 1
         
-        if parent and hasattr(parent, 'tab_widget'):
-            # Find Preview tab
-            for i in range(parent.tab_widget.count()):  # type: ignore
-                tab = parent.tab_widget.widget(i)  # type: ignore
-                if hasattr(tab, 'load_tracking_data'):
-                    # Convert tracker beads to format Preview tab expects
-                    # Try to extract a global voltage/amplitude from video metadata so Preview can plot voltage vs time
-                    meta = self.video_widget.get_metadata() or {}
-                    gv = None
-                    for key in ('voltage', 'amplitude', 'amp'):
-                        if key in meta:
-                            gv = meta.get(key)
-                            break
+        if not parent or not hasattr(parent, 'tab_widget'):
+            Logger.warning("Could not find MainWindow with tab_widget", "XY_TAB")
+            return
+        
+        # Find Preview tab (PreviewWithVideoTab)
+        for i in range(parent.tab_widget.count()):  # type: ignore
+            tab = parent.tab_widget.widget(i)  # type: ignore
+            # Check if this is PreviewWithVideoTab (has load_tracking_data method)
+            if hasattr(tab, 'load_tracking_data'):
+                # Convert tracker beads to format Preview tab expects
+                # Try to extract a global voltage/amplitude from video metadata so Preview can plot voltage vs time
+                meta = self.video_widget.get_metadata() or {}
+                gv = None
+                for key in ('voltage', 'amplitude', 'amp'):
+                    if key in meta:
+                        gv = meta.get(key)
+                        break
 
-                    tracking_data = {}
-                    for bead in self.tracker.beads:
-                        bead_id = bead['id']
-                        positions = bead.get('positions', [])
-                        n = len(positions)
+                tracking_data = {}
+                for bead in self.tracker.beads:
+                    bead_id = bead['id']
+                    positions = bead.get('positions', [])
+                    n = len(positions)
 
-                        # Build per-bead voltage series from global metadata if present
-                        if gv is None:
-                            voltage = [float('nan')] * n
-                        else:
-                            try:
-                                if hasattr(gv, '__len__') and not isinstance(gv, (str, bytes)):
-                                    # If gv is array-like, slice/pad to length n
-                                    if len(gv) >= n:
-                                        voltage = list(map(float, gv[:n]))
-                                    else:
-                                        arr = [float(v) for v in gv]
-                                        arr += [float('nan')] * (n - len(arr))
-                                        voltage = arr
+                    # Build per-bead voltage series from global metadata if present
+                    if gv is None:
+                        voltage = [float('nan')] * n
+                    else:
+                        try:
+                            if hasattr(gv, '__len__') and not isinstance(gv, (str, bytes)):
+                                # If gv is array-like, slice/pad to length n
+                                if len(gv) >= n:
+                                    voltage = list(map(float, gv[:n]))
                                 else:
-                                    # Scalar amplitude -> constant series
-                                    voltage = [float(gv)] * n
-                            except Exception:
-                                voltage = [float('nan')] * n
+                                    arr = [float(v) for v in gv]
+                                    arr += [float('nan')] * (n - len(arr))
+                                    voltage = arr
+                            else:
+                                # Scalar amplitude -> constant series
+                                voltage = [float(gv)] * n
+                        except Exception:
+                            voltage = [float('nan')] * n
 
-                        tracking_data[bead_id] = {
-                            'positions': positions,
-                            'initial_pos': bead.get('initial_pos'),
-                            'voltage': voltage,
-                            'stuck': bool(bead.get('stuck', False)),
-                        }
+                    tracking_data[bead_id] = {
+                        'positions': positions,
+                        'initial_pos': bead.get('initial_pos'),
+                        'z': bead.get('z', [float('nan')] * n),  # Z data if available
+                        'voltage': voltage,
+                        'stuck': bool(bead.get('stuck', False)),
+                    }
 
-                    tab.load_tracking_data(tracking_data)  # type: ignore
-                    Logger.info(f"Updated Preview tab with {len(tracking_data)} beads", "XY_TAB")
-                    break
+                Logger.info(f"Sending {len(tracking_data)} beads to Preview tab", "XY_TAB")
+                tab.load_tracking_data(tracking_data)  # type: ignore
+                Logger.info(f"Preview tab updated successfully", "XY_TAB")
+                break
+        else:
+            Logger.warning("Could not find Preview tab with load_tracking_data method", "XY_TAB")
     
     def _stop_tracking(self):
         """Stop tracking."""

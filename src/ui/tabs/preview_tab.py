@@ -52,6 +52,12 @@ class PreviewTab(QWidget):
         self.function_generator_timeline: Optional[np.ndarray] = None
         # If timeline is provided as event rows, store them here as (times, amps, enabled)
         self._timeline_events = None
+        
+        # Bead list widgets - will be set by parent PreviewWithVideoTab
+        self.bead_list: Optional[QListWidget] = None
+        self.select_all: Optional[QCheckBox] = None
+        self.count_label: Optional[QLabel] = None
+        
         self._init_ui()
 
     def _setup_palette(self):
@@ -71,11 +77,12 @@ class PreviewTab(QWidget):
         # (the parent container already provides the outer padding).
         layout.setContentsMargins(8, 0, 8, 0)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(self._create_bead_list_panel())
-        splitter.addWidget(self._create_plots_panel())
-        splitter.setSizes([260, 640])
-        layout.addWidget(splitter)
+        # Just add plots panel - bead list is now managed by parent PreviewWithVideoTab
+        plots_panel = self._create_plots_panel()
+        # Force size policy to respect parent layout constraints
+        plots_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        plots_panel.setMinimumWidth(100)
+        layout.addWidget(plots_panel)
 
     def _create_bead_list_panel(self) -> QGroupBox:
         """Create bead list panel with checkboxes."""
@@ -154,10 +161,13 @@ class PreviewTab(QWidget):
     def on_video_loaded(self):
         """Called when a new video is loaded."""
         # Clear any existing data
-        self.bead_list.clear()
+        if self.bead_list is not None:
+            self.bead_list.clear()
         self.tracked_beads = {}
-        self.count_label.setText("0 beads loaded")
-        self.select_all.setChecked(False)
+        if self.count_label is not None:
+            self.count_label.setText("0 beads loaded")
+        if self.select_all is not None:
+            self.select_all.setChecked(False)
         # Also clear plots and timeline state so old graphs are not shown
         try:
             self.xy_label.clear()
@@ -177,6 +187,15 @@ class PreviewTab(QWidget):
         Args:
             tracking_data: Dict of bead_id -> {positions, z, voltage, stuck}
         """
+        from utils.logger import Logger
+        Logger.info(f"PreviewTab.load_tracking_data called with {len(tracking_data)} beads", "PREVIEW_TAB")
+        Logger.info(f"bead_list exists: {self.bead_list is not None}", "PREVIEW_TAB")
+        
+        if self.bead_list is None:
+            Logger.warning("bead_list is None, cannot load tracking data!", "PREVIEW_TAB")
+            return
+        
+        Logger.info(f"Clearing bead list and loading {len(tracking_data)} beads", "PREVIEW_TAB")
         self.bead_list.clear()
         self.tracked_beads = {}
         
@@ -196,9 +215,13 @@ class PreviewTab(QWidget):
             item.setCheckState(Qt.CheckState.Checked)
             self.bead_list.addItem(item)
         
+        Logger.info(f"Added {self.bead_list.count()} items to bead_list", "PREVIEW_TAB")
+        
         count = len(tracking_data)
-        self.count_label.setText(f"{count} bead{'s' if count != 1 else ''} loaded")
-        self.select_all.setChecked(True)
+        if self.count_label is not None:
+            self.count_label.setText(f"{count} bead{'s' if count != 1 else ''} loaded")
+        if self.select_all is not None:
+            self.select_all.setChecked(True)
 
         # Try to read a global function generator timeline from the opened HDF5
         # Search robustly for common dataset names under /raw_data or /data.
@@ -210,6 +233,13 @@ class PreviewTab(QWidget):
             # Non-fatal: timeline optional
             self.shared_times = None
             self.function_generator_timeline = None
+        
+        # Automatically select the first bead to display its plots
+        if self.bead_list is not None and self.bead_list.count() > 0:
+            Logger.info(f"Auto-selecting first bead", "PREVIEW_TAB")
+            self.bead_list.setCurrentRow(0)
+        else:
+            Logger.warning(f"Cannot auto-select: bead_list count is {self.bead_list.count() if self.bead_list else 'N/A'}", "PREVIEW_TAB")
 
     def _load_function_generator_timeline(self):
         """Attempt to locate and load a function-generator timeline dataset from the HDF5 file.
@@ -477,6 +507,8 @@ class PreviewTab(QWidget):
 
     def _on_bead_selected(self, current, previous=None):
         """Handle bead selection change."""
+        if self.bead_list is None:
+            return
         if current:
             bead_id = current.data(Qt.ItemDataRole.UserRole)
             self._update_plots_for_bead(bead_id)
@@ -496,7 +528,7 @@ class PreviewTab(QWidget):
 
     def _on_stuck_bead_changed(self, state):
         """Handle stuck bead checkbox state change."""
-        current = self.bead_list.currentItem()
+        current = self.bead_list.currentItem() if self.bead_list is not None else None
         if not current:
             return
         bead_id = current.data(Qt.ItemDataRole.UserRole)
@@ -517,6 +549,8 @@ class PreviewTab(QWidget):
 
     def _toggle_select_all(self, state):
         """Toggle all bead checkboxes."""
+        if not self.bead_list:
+            return
         checked = (state == Qt.CheckState.Checked)
         for i in range(self.bead_list.count()):
             self.bead_list.item(i).setCheckState(
@@ -527,6 +561,8 @@ class PreviewTab(QWidget):
         """Redraw plots on resize."""
         # Let the layout distribute the available vertical space equally.
         # Just trigger redraws for the current selection.
+        if not self.bead_list:
+            return
         try:
             current = self.bead_list.currentItem()
             if current:
@@ -541,11 +577,19 @@ class PreviewTab(QWidget):
 
     def _update_plots_for_bead(self, bead_id):
         """Update all plots for selected bead."""
+        from utils.logger import Logger
+        Logger.info(f"_update_plots_for_bead called for bead_id={bead_id}", "PREVIEW_TAB")
+        
         bead = self.tracked_beads.get(bead_id)
         if not bead:
+            Logger.warning(f"Bead {bead_id} not found in tracked_beads", "PREVIEW_TAB")
             return
-            
+        
+        Logger.info(f"Found bead {bead_id}, updating plots", "PREVIEW_TAB")
         data = bead['data']
+        Logger.info(f"Bead data keys: {data.keys()}", "PREVIEW_TAB")
+        Logger.info(f"Positions count: {len(data.get('positions', []))}", "PREVIEW_TAB")
+        
         self._draw_xy(data.get('positions', []))
         self._draw_time_xy(data.get('positions', []))
         self._draw_time_zv(data.get('z', []), data.get('voltage', []))
@@ -681,10 +725,11 @@ class PreviewTab(QWidget):
         h = max(150, self.xy_label.height())
         buf = self._create_transparent_buffer(w, h)
 
-        # Calculate plot area (square, centered)
-        ml, mt, mr, mb = 80, 40, 40, 60
+        # Calculate plot area (square) - use consistent left margin with other plots
+        # Start plot at left margin to align with other plots (not centered)
+        ml, mt, mr, mb = 140, 40, 40, 60
         plot_size = min(w - ml - mr, h - mt - mb)
-        ox = ml + (w - ml - mr - plot_size) // 2
+        ox = ml  # Start at left margin (aligned with other plots)
         oy = mt + (h - mt - mb - plot_size) // 2
         cx, cy = ox + plot_size // 2, oy + plot_size // 2
 
@@ -711,8 +756,8 @@ class PreviewTab(QWidget):
         # Axis labels
         cv2.putText(buf, 'X (px)', (ox + plot_size // 2 - 30, oy + plot_size + 45), self.FONT, self.FONT_LABEL,
                     (0, 0, 0, 255), 1, self.LINE_AA)
-        # Move Y label: match the middle-plot left-label distance (use same offset)
-        self._draw_rotated_text(buf, 'Y (px)', max(0, ox - 66), cy - 20,
+        # Y label: use consistent position with other plots (ml - 56)
+        self._draw_rotated_text(buf, 'Y (px)', max(0, ml - 56), cy - 20,
                                 font_scale=self.FONT_LABEL, color=(0, 0, 0, 255), rotate_angle=90)
 
         # Tick marks and numbers

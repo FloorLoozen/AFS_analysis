@@ -26,13 +26,14 @@ class PreviewWithVideoTab(QWidget):
             pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
             self.setPalette(pal)
             self.setAutoFillBackground(True)
-        
         layout = QHBoxLayout(self)
         # Uniform outer margin so group boxes have equal space from the widget edges
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(6)
-        
-        # Left: Video container (1/3 width) - divided into 2 rows
+
+        # We'll arrange three equal columns: left (video split in two rows), middle (preview plots),
+        # right (tracked beads / controls placeholder). Each column receives equal stretch.
+        # Left: Video container (first column) - divided into 2 rows
         video_container = QWidget()
         # Match background
         if isinstance(app, QApplication):
@@ -40,34 +41,34 @@ class PreviewWithVideoTab(QWidget):
             pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
             video_container.setPalette(pal)
             video_container.setAutoFillBackground(True)
-        
+
         # Use vertical layout to stack two videos
         video_vertical_layout = QVBoxLayout(video_container)
         video_vertical_layout.setContentsMargins(0, 0, 0, 0)
         video_vertical_layout.setSpacing(6)
-        
+
         # Top video container (main video)
         top_video_group = QGroupBox("Acquisition Movie")
         top_video_layout = QVBoxLayout(top_video_group)
         top_video_layout.setContentsMargins(4, 4, 4, 4)
         top_video_layout.setSpacing(0)
-        
+
         # Video widget container
         video_widget_container = QWidget()
         self.video_container_layout = QHBoxLayout(video_widget_container)
         self.video_container_layout.setContentsMargins(0, 0, 0, 0)
         video_widget_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        
+
         top_video_layout.addWidget(video_widget_container)
-        
+
         video_vertical_layout.addWidget(top_video_group, 1)
-        
+
         # Bottom video placeholder
         bottom_video_group = QGroupBox("LUT Movie")
         bottom_video_layout = QVBoxLayout(bottom_video_group)
         bottom_video_layout.setContentsMargins(4, 4, 4, 4)
         bottom_video_layout.setSpacing(0)
-        
+
         # Placeholder content
         bottom_video_placeholder = QWidget()
         if isinstance(app, QApplication):
@@ -77,23 +78,68 @@ class PreviewWithVideoTab(QWidget):
             bottom_video_placeholder.setAutoFillBackground(True)
         placeholder_layout = QVBoxLayout(bottom_video_placeholder)
         placeholder_layout.setContentsMargins(8, 8, 8, 8)
-        
+
         placeholder_label = QLabel("(To be implemented)")
         placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         placeholder_label.setStyleSheet("color: #888; font-style: italic;")
         placeholder_layout.addWidget(placeholder_label)
-        
+
         bottom_video_layout.addWidget(bottom_video_placeholder)
-        
+
         video_vertical_layout.addWidget(bottom_video_group, 1)
-        
+
         video_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        layout.addWidget(video_container, 1)  # 1:2 ratio - video gets 1 part
+        # Force minimum width to ensure proper sizing
+        video_container.setMinimumWidth(100)
+
+        # Middle column: Bead list panel (swapped position with plots)
+        # We'll create the bead list here and pass it to PreviewTab
+        beads_group = QGroupBox("Tracked Beads")
+        beads_layout = QVBoxLayout(beads_group)
+        beads_layout.setContentsMargins(4, 4, 4, 4)
+        beads_layout.setSpacing(4)
         
-        # Right: Preview graphs (2/3 width)
+        # Create bead list widget
+        from PyQt5.QtWidgets import QListWidget, QCheckBox
+        self.bead_list = QListWidget()
+        self.bead_list.setStyleSheet("QListWidget { background-color: #f0f0f0; border: none; }")
+        beads_layout.addWidget(self.bead_list)
+        
+        # Controls row at bottom
+        from PyQt5.QtWidgets import QHBoxLayout as HBox
+        controls = HBox()
+        controls.setContentsMargins(0, 4, 0, 0)
+        self.select_all = QCheckBox("Select All")
+        controls.addWidget(self.select_all)
+        controls.addStretch()
+        
+        self.count_label = QLabel("0 beads loaded")
+        controls.addWidget(self.count_label)
+        beads_layout.addLayout(controls)
+        
+        # Force size policy for bead list group
+        beads_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        beads_group.setMinimumWidth(100)
+
+        # Right column: Preview plots (swapped position with bead list)
         self.preview_tab = PreviewTab()
         self.preview_tab.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        layout.addWidget(self.preview_tab, 2)  # 1:2 ratio - content gets 2 parts
+        # Prevent preview tab from expanding too much
+        self.preview_tab.setMinimumWidth(100)
+        
+        # Connect bead list to preview tab
+        self.preview_tab.bead_list = self.bead_list
+        self.preview_tab.select_all = self.select_all
+        self.preview_tab.count_label = self.count_label
+        # Connect signals
+        self.bead_list.currentItemChanged.connect(self.preview_tab._on_bead_selected)
+        self.select_all.stateChanged.connect(self.preview_tab._toggle_select_all)
+
+        # Add three columns: video=1/3, bead list=1/3 of remaining 2/3, preview plots=2/3 of remaining 2/3
+        # Ratio 3:2:6 ensures video is exactly 1/3, then remaining 2/3 splits as 1:3 (bead list : plots)
+        layout.addWidget(video_container, 3)  # 3/11 ≈ 27%
+        layout.addWidget(beads_group, 2)  # 2/11 ≈ 18% (middle - bead list)
+        layout.addWidget(self.preview_tab, 6)  # 6/11 ≈ 55% (right - plots)
     
     def set_video_widget(self, video_widget):
         """Set the shared video widget from Traces tab."""
@@ -115,5 +161,10 @@ class PreviewWithVideoTab(QWidget):
     
     def load_tracking_data(self, tracking_data):
         """Forward tracking data to the inner preview tab."""
+        from utils.logger import Logger
+        Logger.info(f"PreviewWithVideoTab received {len(tracking_data)} beads", "PREVIEW_WITH_VIDEO")
         if self.preview_tab:
+            Logger.info(f"Forwarding to inner preview_tab", "PREVIEW_WITH_VIDEO")
             self.preview_tab.load_tracking_data(tracking_data)
+        else:
+            Logger.warning("preview_tab is None!", "PREVIEW_WITH_VIDEO")
