@@ -787,6 +787,33 @@ class PreviewTab(QWidget):
             if not (np.isnan(xs[i]) or np.isnan(xs[i + 1]) or np.isnan(ys[i]) or np.isnan(ys[i + 1])):
                 cv2.line(buf, to_px(xs[i], ys[i]), to_px(xs[i + 1], ys[i + 1]), (200, 0, 0, 255), 1, self.LINE_AA)
 
+        # Calculate and display RMS and symmetry metrics to the right of the plot
+        # RMS: Root mean square of the trajectory (distance from origin)
+        distances = np.sqrt(xs**2 + ys**2)
+        rms = np.sqrt(np.mean(distances**2))
+        
+        # Symmetry: Ratio of movement in X vs Y direction (1.0 = perfectly symmetric)
+        x_range = np.nanmax(np.abs(xs)) if len(xs) > 0 else 0
+        y_range = np.nanmax(np.abs(ys)) if len(ys) > 0 else 0
+        if x_range > 1e-6 and y_range > 1e-6:
+            symmetry = min(x_range, y_range) / max(x_range, y_range)
+        else:
+            symmetry = 0.0
+        
+        # Draw metrics text to the right of the plot, vertically centered in the graph box only
+        metrics_x = ox + plot_size + 30  # More space from plot
+        line_height = 25
+        total_metrics_height = 2 * line_height  # 2 lines of metrics
+        # Center vertically in just the graph box (cy is already the center of the square)
+        # Adjust down to account for visual balance
+        metrics_y_start = cy - total_metrics_height // 2 + 15
+        
+        # Display metrics without header
+        cv2.putText(buf, f'RMS: {rms:.2f} px', (metrics_x, metrics_y_start), 
+                   self.FONT, self.FONT_SMALL, (0, 0, 0, 255), 1, self.LINE_AA)
+        cv2.putText(buf, f'Symmetry: {symmetry:.2f}', (metrics_x, metrics_y_start + line_height), 
+                   self.FONT, self.FONT_SMALL, (0, 0, 0, 255), 1, self.LINE_AA)
+
         self.xy_label.setPixmap(self._buffer_to_pixmap(buf))
 
 
