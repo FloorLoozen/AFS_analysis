@@ -26,35 +26,25 @@ class TrackingDataIO:
         if not beads_data:
             Logger.debug("No bead data to save", "TRACKING_IO")
             return
-        
+
         f = None
         should_close = False
-        
+
         try:
             Logger.debug(f"Saving to HDF5: {hdf5_path}", "TRACKING_IO")
-            
-            # Always open our own file handle for writing
-            # Don't reuse read-only handles from video loader
+
             f = h5py.File(hdf5_path, 'a')
             should_close = True
-            
-            # Create analysed_data group if it doesn't exist
-            if 'analysed_data' not in f:
-                analysis_group = f.create_group('analysed_data')
-            else:
-                analysis_group = f['analysed_data']  # type: ignore
-            
-            # Create or overwrite xy_tracking group
-            if 'xy_tracking' in analysis_group:  # type: ignore
-                del analysis_group['xy_tracking']  # type: ignore
 
-            xy_group = analysis_group.create_group('xy_tracking')  # type: ignore
+            ad = f.require_group('analysed_data')
+            per_frame = ad.require_group('per_frame')
+            per_bead = ad.require_group('per_bead')
 
             # Prepare tracking data
             max_frames = max(len(bead['positions']) for bead in beads_data)
             num_beads = len(beads_data)
 
-            # Detect whether positions include z (3) or only x,y (2)
+            # Detect coordinate dims
             coord_dims = 2
             for bead in beads_data:
                 pos = bead.get('positions')
@@ -64,255 +54,125 @@ class TrackingDataIO:
                         coord_dims = 3
                         break
 
-            # Build positions array (num_frames, num_beads, coord_dims)
             tracking_data = np.full((max_frames, num_beads, coord_dims), -1, dtype=np.int32)
-            templates_list = []
-            # optional per-frame per-bead fields
-            forces_list = []
+
+            # Collect per-bead series for rms/symmetry/stuck
             rms_list = []
-            symmetry_list = []
-            amplitude_list = []
+            sym_list = []
             stuck_list = []
-            frequency_list = []
 
             for bead_idx, bead in enumerate(beads_data):
-                positions = bead['positions']
+                positions = bead.get('positions', [])
                 for frame_idx, coords in enumerate(positions):
-                    # coords may be (x,y) or (x,y,z)
                     try:
                         if isinstance(coords, (list, tuple)):
                             if len(coords) >= 2:
                                 tracking_data[frame_idx, bead_idx, 0] = int(coords[0])
                                 tracking_data[frame_idx, bead_idx, 1] = int(coords[1])
-                            if coord_dims == 3:
-                                if len(coords) >= 3:
-                                    tracking_data[frame_idx, bead_idx, 2] = int(coords[2])
+                            if coord_dims == 3 and len(coords) >= 3:
+                                tracking_data[frame_idx, bead_idx, 2] = int(coords[2])
                         else:
-                            # try to unpack
                             x, y = coords
                             tracking_data[frame_idx, bead_idx, 0] = int(x)
                             tracking_data[frame_idx, bead_idx, 1] = int(y)
                     except Exception:
-                        # ignore malformed entries
                         pass
 
-                # collect templates if present
-                tpl = bead.get('template')
-                if tpl is not None:
-                    templates_list.append(tpl)
-                else:
-                    templates_list.append(None)
-                # collect optional time-series if present (expect list of per-frame values)
-                fseries = bead.get('forces')
-                rms_series = bead.get('rms')
-                sym_series = bead.get('symmetry')
-                amp_series = bead.get('amplitude')
-                stuck_series = bead.get('stuck')
-                freq_series = bead.get('frequency')
+                rms_list.append(bead.get('rms'))
+                sym_list.append(bead.get('symmetry'))
+                stuck_list.append(bead.get('stuck'))
 
-                forces_list.append(fseries)
-                rms_list.append(rms_series)
-                symmetry_list.append(sym_series)
-                amplitude_list.append(amp_series)
-                stuck_list.append(stuck_series)
-                frequency_list.append(freq_series)
+            # choose safe integer dtype for positions
+            if np.any(tracking_data >= 0):
+                mi = int(tracking_data[tracking_data >= 0].min())
+                ma = int(tracking_data.max())
+            else:
+                mi, ma = 0, 0
 
-            # Save positions and templates in compact format if requested
-            if save_compact:
-                # choose safe integer dtype for positions
-                mi = int(tracking_data[tracking_data >= 0].min()) if np.any(tracking_data >= 0) else 0
-                ma = int(tracking_data.max()) if np.any(tracking_data >= 0) else 0
-                if mi >= 0 and ma <= 65535:
-                    pos_dtype = np.uint16
-                elif mi >= -32768 and ma <= 32767:
-                    pos_dtype = np.int16
-                else:
-                    pos_dtype = tracking_data.dtype
+            if mi >= 0 and ma <= 65535:
+                pos_dtype = np.uint16
+            elif mi >= -32768 and ma <= 32767:
+                pos_dtype = np.int16
+            else:
+                pos_dtype = tracking_data.dtype
 
-                dset_pos = xy_group.create_dataset('positions', data=tracking_data.astype(pos_dtype),
-                                                   dtype=pos_dtype, chunks=(1, num_beads, coord_dims), compression=None)
+            # Overwrite positions dataset
+            if 'positions' in per_frame:
+                del per_frame['positions']
+            per_frame.create_dataset('positions', data=tracking_data.astype(pos_dtype),
+                                      dtype=pos_dtype, chunks=(1, num_beads, coord_dims), compression='gzip', compression_opts=4)
+            per_frame.attrs['num_frames'] = max_frames
 
-                # Save metadata as group attributes
-                xy_group.attrs['num_beads'] = num_beads
-                xy_group.attrs['num_frames'] = max_frames
-                xy_group.attrs['description'] = 'XY bead tracking data (compact layout)'
-
-                if metadata:
-                    for key, value in metadata.items():
-                        if value is not None:
-                            xy_group.attrs[key] = value
-
-                # Save per-bead attrs
-                for bead_idx, bead in enumerate(beads_data):
-                    bead_id = bead['id']
-                    initial_x = 0
-                    initial_y = 0
-                    initial_z = None
-                    if bead.get('positions'):
-                        init = bead['positions'][0]
-                        if isinstance(init, (list, tuple)) and len(init) >= 2:
-                            initial_x = init[0]
-                            initial_y = init[1]
-                            if len(init) >= 3:
-                                initial_z = init[2]
-                    xy_group.attrs[f'bead_{bead_idx}_id'] = bead_id
-                    xy_group.attrs[f'bead_{bead_idx}_initial_x'] = initial_x
-                    xy_group.attrs[f'bead_{bead_idx}_initial_y'] = initial_y
-                    if initial_z is not None:
-                        xy_group.attrs[f'bead_{bead_idx}_initial_z'] = initial_z
-                    if 'stuck' in bead:
-                        xy_group.attrs[f'bead_{bead_idx}_stuck'] = bool(bead['stuck'])
-
-                # Stack templates if present and not dropped
-                if not drop_templates and any(t is not None for t in templates_list):
-                    # find template shape from first non-None
-                    first_tpl = next(t for t in templates_list if t is not None)
-                    tshape = first_tpl.shape
-                    stacked = np.zeros((num_beads, tshape[0], tshape[1]), dtype=first_tpl.dtype)
-                    for i, t in enumerate(templates_list):
-                        if t is None:
-                            stacked[i, :, :] = 0
+            # Build and save per-bead static arrays
+            # rms
+            if any(r is not None for r in rms_list):
+                r_bead = np.zeros((num_beads,), dtype=np.float32)
+                for bi, rs in enumerate(rms_list):
+                    if rs is None:
+                        r_bead[bi] = 0.0
+                    else:
+                        arr = np.asarray(rs)
+                        if arr.ndim == 0 or arr.size == 1:
+                            r_bead[bi] = float(arr)
                         else:
-                            stacked[i, :, :] = t
-                    # store as float16 to save space
-                    xy_group.create_dataset('templates', data=stacked.astype(np.float16),
-                                            dtype=np.float16, chunks=(1,) + tshape, compression='gzip', compression_opts=4)
+                            r_bead[bi] = float(np.nanmean(arr))
+                if 'rms_per_bead' in per_bead:
+                    del per_bead['rms_per_bead']
+                per_bead.create_dataset('rms_per_bead', data=r_bead, dtype=np.float32, compression='gzip', compression_opts=4)
 
-                # Build and save optional arrays if any bead provided them
-                # forces: (F, B, 3)
-                if any(f is not None for f in forces_list):
-                    fshape = (max_frames, num_beads, 3)
-                    farr = np.zeros(fshape, dtype=np.float32)
-                    for bi, fs in enumerate(forces_list):
-                        if fs is None:
-                            farr[:, bi, :] = 0.0
+            # symmetry
+            if any(s is not None for s in sym_list):
+                s_bead = np.zeros((num_beads,), dtype=np.float32)
+                for bi, ss in enumerate(sym_list):
+                    if ss is None:
+                        s_bead[bi] = 0.0
+                    else:
+                        arr = np.asarray(ss)
+                        if arr.ndim == 0 or arr.size == 1:
+                            s_bead[bi] = float(arr)
                         else:
-                            for fi, vv in enumerate(fs):
-                                farr[fi, bi, :] = vv
-                    xy_group.create_dataset('forces', data=farr, dtype=np.float32,
-                                             chunks=(1, num_beads, 3), compression='gzip', compression_opts=4)
+                            s_bead[bi] = float(np.nanmean(arr))
+                if 'symmetry_per_bead' in per_bead:
+                    del per_bead['symmetry_per_bead']
+                per_bead.create_dataset('symmetry_per_bead', data=s_bead, dtype=np.float32, compression='gzip', compression_opts=4)
 
-                # rms: store as static per-bead value (B,). If provided as per-frame series,
-                # reduce to per-bead mean across frames.
-                if any(r is not None for r in rms_list):
-                    r_bead = np.zeros((num_beads,), dtype=np.float32)
-                    for bi, rs in enumerate(rms_list):
-                        if rs is None:
-                            r_bead[bi] = 0.0
-                        else:
-                            arr = np.asarray(rs)
-                            if arr.ndim == 0 or arr.size == 1:
-                                r_bead[bi] = float(arr)
-                            else:
-                                r_bead[bi] = float(np.nanmean(arr))
-                    xy_group.create_dataset('rms_per_bead', data=r_bead, dtype=np.float32,
-                                             chunks=(num_beads,), compression='gzip', compression_opts=4)
-
-                # symmetry: store as static per-bead value (B,). Reduce per-frame series by mean.
-                if any(s is not None for s in symmetry_list):
-                    s_bead = np.zeros((num_beads,), dtype=np.float32)
-                    for bi, ss in enumerate(symmetry_list):
-                        if ss is None:
-                            s_bead[bi] = 0.0
-                        else:
-                            arr = np.asarray(ss)
-                            if arr.ndim == 0 or arr.size == 1:
-                                s_bead[bi] = float(arr)
-                            else:
-                                s_bead[bi] = float(np.nanmean(arr))
-                    xy_group.create_dataset('symmetry_per_bead', data=s_bead, dtype=np.float32,
-                                             chunks=(num_beads,), compression='gzip', compression_opts=4)
-
-                # amplitude: (F, B)
-                if any(a is not None for a in amplitude_list):
-                    aarr = np.zeros((max_frames, num_beads), dtype=np.float32)
-                    for bi, aa in enumerate(amplitude_list):
-                        if aa is None:
-                            aarr[:, bi] = 0.0
-                        else:
-                            for fi, vv in enumerate(aa):
-                                aarr[fi, bi] = vv
-                    xy_group.create_dataset('amplitude', data=aarr, dtype=np.float32,
-                                             chunks=(1, num_beads), compression='gzip', compression_opts=4)
-
-                # frequency: (F, B) optional per-frame frequency estimate (Hz)
-                if any(fr is not None for fr in frequency_list):
-                    farr = np.zeros((max_frames, num_beads), dtype=np.float32)
-                    for bi, frs in enumerate(frequency_list):
-                        if frs is None:
-                            farr[:, bi] = 0.0
-                        else:
-                            for fi, vv in enumerate(frs):
-                                farr[fi, bi] = vv
-                    xy_group.create_dataset('frequency', data=farr, dtype=np.float32,
-                                             chunks=(1, num_beads), compression='gzip', compression_opts=4)
-
-                # stuck: store static per-bead flag (B,) as uint8. If provided per-frame,
-                # reduce with logical OR (any True -> stuck=1).
-                if any(st is not None for st in stuck_list):
-                    st_bead = np.zeros((num_beads,), dtype=np.uint8)
-                    for bi, stl in enumerate(stuck_list):
-                        if stl is None:
-                            st_bead[bi] = 0
-                        else:
+            # stuck: static per-bead flags
+            if any(st is not None for st in stuck_list):
+                st_bead = np.zeros((num_beads,), dtype=np.uint8)
+                for bi, stl in enumerate(stuck_list):
+                    if stl is None:
+                        st_bead[bi] = 0
+                    else:
+                        # If provided as per-frame list -> reduce by any
+                        if isinstance(stl, (list, tuple, np.ndarray)):
                             arr = np.asarray(stl).astype(bool)
                             st_bead[bi] = 1 if np.any(arr) else 0
-                    xy_group.create_dataset('stuck_per_bead', data=st_bead, dtype=np.uint8,
-                                             chunks=(num_beads,), compression='gzip', compression_opts=1)
-                    # also store per-bead attr for backward compatibility
-                    for bi in range(num_beads):
-                        xy_group.attrs[f'bead_{bi}_stuck'] = bool(st_bead[bi])
+                        else:
+                            st_bead[bi] = 1 if bool(stl) else 0
+                if 'stuck_per_bead' in per_bead:
+                    del per_bead['stuck_per_bead']
+                per_bead.create_dataset('stuck_per_bead', data=st_bead, dtype=np.uint8, compression='gzip', compression_opts=1)
 
-            else:
-                # Legacy behavior: store positions as int32 and individual templates per bead
-                positions_dataset = xy_group.create_dataset('positions', data=tracking_data)
+            # store simple per-bead attributes for convenience
+            per_bead.attrs['num_beads'] = num_beads
 
-                xy_group.attrs['num_beads'] = num_beads
-                xy_group.attrs['num_frames'] = max_frames
-                xy_group.attrs['description'] = 'XY bead tracking data'
+            # Save metadata at analysed_data level
+            if metadata:
+                for key, value in metadata.items():
+                    if value is not None:
+                        ad.attrs[key] = value
 
-                if metadata:
-                    for key, value in metadata.items():
-                        if value is not None:
-                            xy_group.attrs[key] = value
-
-                for bead_idx, bead in enumerate(beads_data):
-                    bead_id = bead['id']
-                    initial_x = 0
-                    initial_y = 0
-                    initial_z = None
-                    if bead.get('positions'):
-                        init = bead['positions'][0]
-                        if isinstance(init, (list, tuple)) and len(init) >= 2:
-                            initial_x = init[0]
-                            initial_y = init[1]
-                            if len(init) >= 3:
-                                initial_z = init[2]
-                    xy_group.attrs[f'bead_{bead_idx}_id'] = bead_id
-                    xy_group.attrs[f'bead_{bead_idx}_initial_x'] = initial_x
-                    xy_group.attrs[f'bead_{bead_idx}_initial_y'] = initial_y
-                    if initial_z is not None:
-                        xy_group.attrs[f'bead_{bead_idx}_initial_z'] = initial_z
-                    if 'stuck' in bead:
-                        xy_group.attrs[f'bead_{bead_idx}_stuck'] = bool(bead['stuck'])
-
-                    if 'template' in bead and bead['template'] is not None:
-                        template_name = f'bead_{bead_idx}_template'
-                        xy_group.create_dataset(template_name, data=bead['template'])
-            
-            # Flush to ensure data is written
             if should_close:
                 f.flush()
-            
-            Logger.success(f"Saved {num_beads} beads, {max_frames} frames to /analysed_data/xy_tracking/", "TRACKING_IO")
-                
+
+            Logger.success(f"Saved {num_beads} beads, {max_frames} frames to /analysed_data/ (per_frame + per_bead)", "TRACKING_IO")
+
         except Exception as e:
             Logger.error(f"Error saving tracking data: {e}", "TRACKING_IO")
             import traceback
             traceback.print_exc()
             raise
         finally:
-            # Always close if we opened it ourselves
             if should_close and f is not None:
                 try:
                     f.close()
@@ -337,47 +197,111 @@ class TrackingDataIO:
         try:
             Logger.debug(f"Loading from HDF5: {hdf5_path}", "TRACKING_IO")
             with h5py.File(hdf5_path, 'r') as f:
-                if 'analysed_data' not in f or 'xy_tracking' not in f['analysed_data']:  # type: ignore
+                if 'analysed_data' not in f:
                     return beads_data, metadata
-                
-                xy_group = f['analysed_data']['xy_tracking']  # type: ignore
-                
-                # Check if it's a group (new format) or dataset (old format)
-                if isinstance(xy_group, h5py.Group):
-                    # New format
-                    if 'positions' not in xy_group:
-                        return beads_data, metadata
-                    
-                    tracking_data = xy_group['positions'][:]  # type: ignore
-                    
-                    # Load metadata from group attributes
+
+                ad = f['analysed_data']
+
+                # Preferred new layout: per_frame/positions and per_bead/*
+                if 'per_frame' in ad and 'positions' in ad['per_frame']:
+                    positions = ad['per_frame']['positions'][:]
+                    # load per-bead arrays if present
+                    rms_pb = ad['per_bead']['rms_per_bead'][:] if ('per_bead' in ad and 'rms_per_bead' in ad['per_bead']) else None
+                    sym_pb = ad['per_bead']['symmetry_per_bead'][:] if ('per_bead' in ad and 'symmetry_per_bead' in ad['per_bead']) else None
+                    stuck_pb = ad['per_bead']['stuck_per_bead'][:] if ('per_bead' in ad and 'stuck_per_bead' in ad['per_bead']) else None
+
+                    num_frames = int(ad['per_frame'].attrs.get('num_frames', positions.shape[0]))
+                    num_beads = int(ad['per_bead'].attrs.get('num_beads', positions.shape[1]) if 'per_bead' in ad else positions.shape[1])
+
+                    # Reconstruct bead dictionaries
+                    for bead_idx in range(num_beads):
+                        pos_list = []
+                        for fi in range(positions.shape[0]):
+                                    coords = positions[fi, bead_idx]
+                                    # coords may be length 2 or 3; be robust to NaN/missing values
+                                    try:
+                                        vals = np.asarray(coords, dtype=float)
+                                    except Exception:
+                                        continue
+
+                                    if vals.size < 2:
+                                        continue
+                                    x = float(vals[0])
+                                    y = float(vals[1])
+                                    # skip non-finite or negative coordinates
+                                    if not (np.isfinite(x) and np.isfinite(y)):
+                                        continue
+                                    if x < 0 or y < 0:
+                                        continue
+
+                                    if vals.size >= 3:
+                                        z = float(vals[2])
+                                        if np.isfinite(z):
+                                            pos_list.append((int(x), int(y), int(z)))
+                                        else:
+                                            pos_list.append((int(x), int(y)))
+                                    else:
+                                        pos_list.append((int(x), int(y)))
+
+                        if not pos_list:
+                            continue
+
+                        bead_id = bead_idx
+                        initial_x, initial_y = pos_list[0][0], pos_list[0][1]
+
+                        bead = {
+                            'id': bead_id,
+                            'positions': pos_list,
+                            'initial_pos': (initial_x, initial_y),
+                            'template': None,
+                            'stuck': bool(stuck_pb[bead_idx]) if stuck_pb is not None else False,
+                            'rms': float(rms_pb[bead_idx]) if rms_pb is not None else None,
+                            'symmetry': float(sym_pb[bead_idx]) if sym_pb is not None else None,
+                        }
+
+                        beads_data.append(bead)
+
+                    Logger.success(f"Loaded {len(beads_data)} beads from analysed_data/per_frame and per_bead", "TRACKING_IO")
+                    return beads_data, metadata
+
+                # Fallback to legacy xy_tracking layout for compatibility
+                if 'xy_tracking' in ad and 'positions' in ad['xy_tracking']:
+                    xy_group = ad['xy_tracking']
+                    tracking_data = xy_group['positions'][:]
                     for key, value in xy_group.attrs.items():
                         metadata[key] = value
-                    
-                    num_beads = int(metadata.get('num_beads', tracking_data.shape[1]))  # type: ignore
 
-                    # Load per-bead static arrays if present
+                    num_beads = int(metadata.get('num_beads', tracking_data.shape[1]))
                     rms_pb = xy_group['rms_per_bead'][:] if 'rms_per_bead' in xy_group else None
                     sym_pb = xy_group['symmetry_per_bead'][:] if 'symmetry_per_bead' in xy_group else None
                     stuck_pb = xy_group['stuck_per_bead'][:] if 'stuck_per_bead' in xy_group else None
 
-                    # Reconstruct bead dictionaries
                     for bead_idx in range(num_beads):
                         positions = []
-                        for frame_idx in range(tracking_data.shape[0]):  # type: ignore
-                            coords = tracking_data[frame_idx, bead_idx, :]  # type: ignore
-                            if coords.size == 3:
-                                x, y, z = coords
-                                if x >= 0 and y >= 0:
+                        for frame_idx in range(tracking_data.shape[0]):
+                            coords = tracking_data[frame_idx, bead_idx, :]
+                            try:
+                                vals = np.asarray(coords, dtype=float)
+                            except Exception:
+                                continue
+
+                            if vals.size < 2:
+                                continue
+                            x = float(vals[0])
+                            y = float(vals[1])
+                            if not (np.isfinite(x) and np.isfinite(y)):
+                                continue
+                            if x < 0 or y < 0:
+                                continue
+
+                            if vals.size == 3:
+                                z = float(vals[2])
+                                if np.isfinite(z):
                                     positions.append((int(x), int(y), int(z)))
                                 else:
-                                    break
-                            else:
-                                x, y = coords[:2]
-                                if x >= 0 and y >= 0:
                                     positions.append((int(x), int(y)))
-                                else:
-                                    break
+                            else:
+                                positions.append((int(x), int(y)))
 
                         if not positions:
                             continue
@@ -387,16 +311,11 @@ class TrackingDataIO:
                         initial_y = int(metadata.get(f'bead_{bead_idx}_initial_y', positions[0][1]))
 
                         template = None
-                        # Support stacked templates ('templates') (compact layout) or per-bead datasets
                         if 'templates' in xy_group:
                             try:
-                                template = xy_group['templates'][bead_idx][:]  # type: ignore
+                                template = xy_group['templates'][bead_idx][:]
                             except Exception:
                                 template = None
-                        else:
-                            template_name = f'bead_{bead_idx}_template'
-                            if template_name in xy_group:
-                                template = xy_group[template_name][:]  # type: ignore
 
                         bead = {
                             'id': bead_id,
@@ -409,63 +328,15 @@ class TrackingDataIO:
                         }
 
                         beads_data.append(bead)
-                else:
-                    # Old format: backward compatibility
-                    tracking_data = xy_group[:]  # type: ignore
-                    
-                    for key, value in xy_group.attrs.items():
-                        metadata[key] = value
-                    
-                    num_beads = int(metadata.get('num_beads', tracking_data.shape[1]))  # type: ignore
-                    
-                    for bead_idx in range(num_beads):
-                        positions = []
-                        for frame_idx in range(tracking_data.shape[0]):  # type: ignore
-                            coords = tracking_data[frame_idx, bead_idx, :]  # type: ignore
-                            if coords.size == 3:
-                                x, y, z = coords
-                                if x >= 0 and y >= 0:
-                                    positions.append((int(x), int(y), int(z)))
-                                else:
-                                    break
-                            else:
-                                x, y = coords[:2]
-                                if x >= 0 and y >= 0:
-                                    positions.append((int(x), int(y)))
-                                else:
-                                    break
-                        
-                        if not positions:
-                            continue
-                        
-                        bead_id = int(metadata.get(f'bead_{bead_idx}_id', bead_idx))
-                        initial_x = int(metadata.get(f'bead_{bead_idx}_initial_x', positions[0][0]))
-                        initial_y = int(metadata.get(f'bead_{bead_idx}_initial_y', positions[0][1]))
-                        
-                        template = None
-                        template = None
-                        # Old-style per-dataset template name
-                        template_name = f'xy_tracking_bead_{bead_idx}_template'
-                        if template_name in f['analysed_data']:  # type: ignore
-                            template = f['analysed_data'][template_name][:]  # type: ignore
-                        
-                        bead = {
-                            'id': bead_id,
-                            'positions': positions,
-                            'initial_pos': (initial_x, initial_y),
-                            'template': template,
-                            'stuck': bool(metadata.get(f'bead_{bead_idx}_stuck', False))
-                        }
-                        
-                        beads_data.append(bead)
-                
-                Logger.success(f"Loaded {len(beads_data)} beads", "TRACKING_IO")
-                
+
+                    Logger.success(f"Loaded {len(beads_data)} beads (legacy xy_tracking)", "TRACKING_IO")
+                    return beads_data, metadata
+
         except Exception as e:
             Logger.error(f"Error loading tracking data: {e}", "TRACKING_IO")
             import traceback
             traceback.print_exc()
-        
+
         return beads_data, metadata
     
     @staticmethod

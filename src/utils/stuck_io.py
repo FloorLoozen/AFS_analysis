@@ -30,21 +30,26 @@ def write_stuck_per_bead(hdf5_path: str, stuck: Sequence[int]) -> None:
     arr = np.asarray(stuck, dtype=np.uint8)
 
     with h5py.File(str(path), 'a') as hf:
-        # Ensure analysed_data/xy_tracking exist (same location as TrackingDataIO)
+        # Store per-bead arrays under analysed_data/per_bead (user requested layout)
         ad = hf.require_group('analysed_data')
-        xy = ad.require_group('xy_tracking')
+        pb = ad.require_group('per_bead')
 
-        if 'stuck_per_bead' in xy:
-            ds = xy['stuck_per_bead']
-            # Resize if necessary
-            if ds.shape != arr.shape:
-                # Overwrite with new dataset to avoid complex resizing semantics
-                del xy['stuck_per_bead']
-                xy.create_dataset('stuck_per_bead', data=arr, dtype='u1')
-            else:
-                ds[:] = arr
+        if 'stuck_per_bead' in pb:
+            ds = pb['stuck_per_bead']
+            # Resize/overwrite if necessary
+            try:
+                if ds.shape != arr.shape:
+                    del pb['stuck_per_bead']
+                    pb.create_dataset('stuck_per_bead', data=arr, dtype='u1')
+                else:
+                    ds[:] = arr
+            except Exception:
+                # Fallback: recreate dataset
+                if 'stuck_per_bead' in pb:
+                    del pb['stuck_per_bead']
+                pb.create_dataset('stuck_per_bead', data=arr, dtype='u1')
         else:
-            xy.create_dataset('stuck_per_bead', data=arr, dtype='u1')
+            pb.create_dataset('stuck_per_bead', data=arr, dtype='u1')
 
 
 def set_stuck_flag(hdf5_path: str, bead_id: int, is_stuck: bool, num_beads: Optional[int] = None) -> None:
@@ -73,33 +78,40 @@ def set_stuck_flag(hdf5_path: str, bead_id: int, is_stuck: bool, num_beads: Opti
 
     with h5py.File(str(path), 'a') as hf:
         ad = hf.require_group('analysed_data')
-        xy = ad.require_group('xy_tracking')
+        pb = ad.require_group('per_bead')
 
         desired_len = (num_beads if (num_beads is not None and num_beads > 0) else (bead_id + 1))
 
-        if 'stuck_per_bead' in xy:
-            ds = xy['stuck_per_bead']
-            cur_len = ds.shape[0]
+        if 'stuck_per_bead' in pb:
+            ds = pb['stuck_per_bead']
+            try:
+                cur_len = ds.shape[0]
+            except Exception:
+                cur_len = 0
+
             if cur_len <= bead_id or cur_len < desired_len:
-                # create new dataset with desired length, copy old data
-                old = np.array(ds[:], dtype=np.uint8)
+                # extend dataset by recreating with desired length and copying old data
+                try:
+                    old = np.array(ds[:], dtype=np.uint8)
+                except Exception:
+                    old = np.zeros((0,), dtype=np.uint8)
                 newlen = max(desired_len, bead_id + 1)
                 new = np.zeros((newlen,), dtype=np.uint8)
                 new[:old.shape[0]] = old
-                # remove and recreate
-                del xy['stuck_per_bead']
-                xy.create_dataset('stuck_per_bead', data=new, dtype='u1')
-                ds = xy['stuck_per_bead']
+                if 'stuck_per_bead' in pb:
+                    del pb['stuck_per_bead']
+                pb.create_dataset('stuck_per_bead', data=new, dtype='u1')
+                ds = pb['stuck_per_bead']
         else:
             # Create new dataset sized to desired_len (at least bead_id+1)
             newlen = max(desired_len, bead_id + 1)
-            ds = xy.create_dataset('stuck_per_bead', data=np.zeros((newlen,), dtype=np.uint8), dtype='u1')
+            ds = pb.create_dataset('stuck_per_bead', data=np.zeros((newlen,), dtype=np.uint8), dtype='u1')
 
-        # Write the flag
+        # Write the flag for this bead (per-bead static)
         ds[bead_id] = 1 if is_stuck else 0
-        
-        # Also update the attribute for backward compatibility
-        xy.attrs[f'bead_{bead_id}_stuck'] = is_stuck
+
+        # Also update attribute for backward compatibility
+        pb.attrs[f'bead_{bead_id}_stuck'] = bool(is_stuck)
 
 
 def read_stuck_per_bead(hdf5_path: str) -> np.ndarray:
@@ -116,6 +128,14 @@ def read_stuck_per_bead(hdf5_path: str) -> np.ndarray:
         raise FileNotFoundError(f"HDF5 file not found: {hdf5_path}")
 
     with h5py.File(str(path), 'r') as hf:
-        if 'analysed_data' in hf and 'xy_tracking' in hf['analysed_data'] and 'stuck_per_bead' in hf['analysed_data']['xy_tracking']:
-            return np.array(hf['analysed_data']['xy_tracking']['stuck_per_bead'][:], dtype=np.uint8)
+        # Prefer new location analysed_data/per_bead/stuck_per_bead
+        if 'analysed_data' in hf:
+            ad = hf['analysed_data']
+            if 'per_bead' in ad and 'stuck_per_bead' in ad['per_bead']:
+                return np.array(ad['per_bead']['stuck_per_bead'][:], dtype=np.uint8)
+
+            # Fallback: legacy xy_tracking location
+            if 'xy_tracking' in ad and 'stuck_per_bead' in ad['xy_tracking']:
+                return np.array(ad['xy_tracking']['stuck_per_bead'][:], dtype=np.uint8)
+
         return np.zeros((0,), dtype=np.uint8)
