@@ -3,6 +3,9 @@
 This module centralizes writes so the UI can call a single helper instead of
 doing ad-hoc HDF5 writes inline. The helpers are minimal and "best-effort":
 they raise on I/O errors so callers can choose how to report failures.
+
+Note: This uses the same location as TrackingDataIO for compatibility:
+analysed_data/xy_tracking/stuck_per_bead
 """
 from pathlib import Path
 from typing import Sequence, Optional
@@ -27,21 +30,21 @@ def write_stuck_per_bead(hdf5_path: str, stuck: Sequence[int]) -> None:
     arr = np.asarray(stuck, dtype=np.uint8)
 
     with h5py.File(str(path), 'a') as hf:
-        # Ensure analysed_data/per_bead exist
+        # Ensure analysed_data/xy_tracking exist (same location as TrackingDataIO)
         ad = hf.require_group('analysed_data')
-        pb = ad.require_group('per_bead')
+        xy = ad.require_group('xy_tracking')
 
-        if 'stuck_per_bead' in pb:
-            ds = pb['stuck_per_bead']
+        if 'stuck_per_bead' in xy:
+            ds = xy['stuck_per_bead']
             # Resize if necessary
             if ds.shape != arr.shape:
                 # Overwrite with new dataset to avoid complex resizing semantics
-                del pb['stuck_per_bead']
-                pb.create_dataset('stuck_per_bead', data=arr, dtype='u1')
+                del xy['stuck_per_bead']
+                xy.create_dataset('stuck_per_bead', data=arr, dtype='u1')
             else:
                 ds[:] = arr
         else:
-            pb.create_dataset('stuck_per_bead', data=arr, dtype='u1')
+            xy.create_dataset('stuck_per_bead', data=arr, dtype='u1')
 
 
 def set_stuck_flag(hdf5_path: str, bead_id: int, is_stuck: bool, num_beads: Optional[int] = None) -> None:
@@ -70,12 +73,12 @@ def set_stuck_flag(hdf5_path: str, bead_id: int, is_stuck: bool, num_beads: Opti
 
     with h5py.File(str(path), 'a') as hf:
         ad = hf.require_group('analysed_data')
-        pb = ad.require_group('per_bead')
+        xy = ad.require_group('xy_tracking')
 
         desired_len = (num_beads if (num_beads is not None and num_beads > 0) else (bead_id + 1))
 
-        if 'stuck_per_bead' in pb:
-            ds = pb['stuck_per_bead']
+        if 'stuck_per_bead' in xy:
+            ds = xy['stuck_per_bead']
             cur_len = ds.shape[0]
             if cur_len <= bead_id or cur_len < desired_len:
                 # create new dataset with desired length, copy old data
@@ -84,16 +87,19 @@ def set_stuck_flag(hdf5_path: str, bead_id: int, is_stuck: bool, num_beads: Opti
                 new = np.zeros((newlen,), dtype=np.uint8)
                 new[:old.shape[0]] = old
                 # remove and recreate
-                del pb['stuck_per_bead']
-                pb.create_dataset('stuck_per_bead', data=new, dtype='u1')
-                ds = pb['stuck_per_bead']
+                del xy['stuck_per_bead']
+                xy.create_dataset('stuck_per_bead', data=new, dtype='u1')
+                ds = xy['stuck_per_bead']
         else:
             # Create new dataset sized to desired_len (at least bead_id+1)
             newlen = max(desired_len, bead_id + 1)
-            ds = pb.create_dataset('stuck_per_bead', data=np.zeros((newlen,), dtype=np.uint8), dtype='u1')
+            ds = xy.create_dataset('stuck_per_bead', data=np.zeros((newlen,), dtype=np.uint8), dtype='u1')
 
         # Write the flag
         ds[bead_id] = 1 if is_stuck else 0
+        
+        # Also update the attribute for backward compatibility
+        xy.attrs[f'bead_{bead_id}_stuck'] = is_stuck
 
 
 def read_stuck_per_bead(hdf5_path: str) -> np.ndarray:
@@ -110,6 +116,6 @@ def read_stuck_per_bead(hdf5_path: str) -> np.ndarray:
         raise FileNotFoundError(f"HDF5 file not found: {hdf5_path}")
 
     with h5py.File(str(path), 'r') as hf:
-        if 'analysed_data' in hf and 'per_bead' in hf['analysed_data'] and 'stuck_per_bead' in hf['analysed_data']['per_bead']:
-            return np.array(hf['analysed_data']['per_bead']['stuck_per_bead'][:], dtype=np.uint8)
+        if 'analysed_data' in hf and 'xy_tracking' in hf['analysed_data'] and 'stuck_per_bead' in hf['analysed_data']['xy_tracking']:
+            return np.array(hf['analysed_data']['xy_tracking']['stuck_per_bead'][:], dtype=np.uint8)
         return np.zeros((0,), dtype=np.uint8)
