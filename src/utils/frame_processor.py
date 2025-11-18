@@ -125,9 +125,9 @@ class FrameProcessor:
             pt2 = (x_int + half_size, y_int + half_size)
             cv2.rectangle(frame_with_overlay, pt1, pt2, color, box_thickness)
             
-            # Draw label
+            # Draw label (0-based bead id)
             label_pos = (x_int - half_size, y_int - half_size - 5)
-            cv2.putText(frame_with_overlay, str(bead_id + 1), 
+            cv2.putText(frame_with_overlay, str(bead_id), 
                        label_pos,
                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
         

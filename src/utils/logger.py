@@ -26,16 +26,16 @@ class Logger:
     def warning(message: str, module: Optional[str] = None):
         """Log warning message."""
         prefix = f"[{module}]" if module else "[WARNING]"
-        print(f"⚠ {prefix} {message}", file=sys.stderr)
+        print(f"[WARN] {prefix} {message}", file=sys.stderr)
     
     @staticmethod
     def error(message: str, module: Optional[str] = None):
         """Log error message."""
         prefix = f"[{module}]" if module else "[ERROR]"
-        print(f"✗ {prefix} {message}", file=sys.stderr)
+        print(f"[ERROR] {prefix} {message}", file=sys.stderr)
     
     @staticmethod
     def success(message: str, module: Optional[str] = None):
         """Log success message."""
         prefix = f"[{module}]" if module else "[SUCCESS]"
-        print(f"✓ {prefix} {message}")
+        print(f"[OK] {prefix} {message}")

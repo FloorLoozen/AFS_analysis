@@ -205,7 +205,7 @@ class PreviewTab(QWidget):
                 'stuck': bool(data.get('stuck', False))
             }
             
-            text = f"Bead {bead_id + 1}"
+            text = f"Bead {bead_id}"
             if self.tracked_beads[bead_id]['stuck']:
                 text += " 🔒"
                 
@@ -541,11 +541,36 @@ class PreviewTab(QWidget):
         bead['stuck'] = is_stuck
 
         # Update the bead list item text to show/hide lock icon
-        base_name = f"Bead {bead_id + 1}"
+        base_name = f"Bead {bead_id}"
         if is_stuck:
             current.setText(f"{base_name} 🔒")
         else:
             current.setText(base_name)
+
+        # Persist stuck state via utils helper (centralized HDF5 writes)
+        try:
+            if self.video_widget and hasattr(self.video_widget, 'controller') and getattr(self.video_widget.controller, 'video_source', None):
+                vs = self.video_widget.controller.video_source
+                if vs is not None and getattr(vs, 'file_path', None):
+                    try:
+                        vs.temporary_close_for_writing()
+                    except Exception:
+                        pass
+
+                    try:
+                        # Import here to avoid top-level dependency during tests
+                        from src.utils.stuck_io import set_stuck_flag
+
+                        num_beads = max(self.tracked_beads.keys()) + 1 if self.tracked_beads else None
+                        set_stuck_flag(vs.file_path, bead_id, is_stuck, num_beads=num_beads)
+                    finally:
+                        try:
+                            vs.reopen_after_writing()
+                        except Exception:
+                            pass
+        except Exception:
+            # Best-effort: swallow errors so UI remains responsive
+            pass
 
     def _toggle_select_all(self, state):
         """Toggle all bead checkboxes."""
@@ -807,12 +832,13 @@ class PreviewTab(QWidget):
         # Center vertically in just the graph box (cy is already the center of the square)
         # Adjust down to account for visual balance
         metrics_y_start = cy - total_metrics_height // 2 + 15
-        
+
         # Display metrics without header
-        cv2.putText(buf, f'RMS: {rms:.2f} px', (metrics_x, metrics_y_start), 
-                   self.FONT, self.FONT_SMALL, (0, 0, 0, 255), 1, self.LINE_AA)
-        cv2.putText(buf, f'Symmetry: {symmetry:.2f}', (metrics_x, metrics_y_start + line_height), 
-                   self.FONT, self.FONT_SMALL, (0, 0, 0, 255), 1, self.LINE_AA)
+        # Use the same font size as plot labels for visual consistency
+        cv2.putText(buf, f'RMS: {rms:.2f} px', (metrics_x, metrics_y_start),
+                self.FONT, self.FONT_LABEL, (0, 0, 0, 255), 1, self.LINE_AA)
+        cv2.putText(buf, f'Symmetry: {symmetry:.2f}', (metrics_x, metrics_y_start + line_height),
+                self.FONT, self.FONT_LABEL, (0, 0, 0, 255), 1, self.LINE_AA)
 
         self.xy_label.setPixmap(self._buffer_to_pixmap(buf))
 

@@ -34,25 +34,25 @@ class InfoTab(QWidget):
     
     def _init_ui(self):
         """Initialize the user interface with scrollable metadata."""
-    # Main layout - give a uniform outer margin so the group boxes have equal spacing
-    main_layout = QVBoxLayout(self)
-    main_layout.setContentsMargins(8, 8, 8, 8)
-    main_layout.setSpacing(0)
-        
+        # Main layout - give a uniform outer margin so the group boxes have equal spacing
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(0)
+
         # Create scroll area without frame
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QScrollArea.NoFrame)  # Remove black border
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        
+
         # Container widget for scroll area
         scroll_widget = QWidget()
-    layout = QVBoxLayout(scroll_widget)
-    # Use uniform top margin here as well for visual consistency
-    layout.setContentsMargins(8, 8, 8, 8)
-    layout.setSpacing(10)
-        
+        layout = QVBoxLayout(scroll_widget)
+        # Use uniform top margin here as well for visual consistency
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(10)
+
         # GPU/System Info Section (always visible)
         system_group = QGroupBox("System Info")
         self.system_layout = QFormLayout(system_group)
@@ -61,10 +61,10 @@ class InfoTab(QWidget):
         self.system_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         self.system_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)  # type: ignore
         layout.addWidget(system_group)
-        
+
         # Populate GPU info immediately
         self._populate_system_info()
-        
+
         # Measurement Info Section
         measurement_group = QGroupBox("Measurement Info")
         self.measurement_layout = QFormLayout(measurement_group)
@@ -73,7 +73,7 @@ class InfoTab(QWidget):
         self.measurement_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         self.measurement_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)  # type: ignore
         layout.addWidget(measurement_group)
-        
+
         # Video Info Section
         video_group = QGroupBox("Video Info")
         self.video_layout = QFormLayout(video_group)
@@ -82,7 +82,7 @@ class InfoTab(QWidget):
         self.video_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         self.video_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)  # type: ignore
         layout.addWidget(video_group)
-        
+
         # File Info Section
         file_group = QGroupBox("File Info")
         self.file_layout = QFormLayout(file_group)
@@ -91,7 +91,7 @@ class InfoTab(QWidget):
         self.file_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         self.file_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)  # type: ignore
         layout.addWidget(file_group)
-        
+
         # Additional Metadata Section (for all other HDF5 attributes)
         metadata_group = QGroupBox("Additional Metadata")
         self.metadata_layout = QFormLayout(metadata_group)
@@ -100,9 +100,9 @@ class InfoTab(QWidget):
         self.metadata_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         self.metadata_layout.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)  # type: ignore
         layout.addWidget(metadata_group)
-        
+
         layout.addStretch()
-        
+
         # Set scroll widget and add to main layout
         scroll_area.setWidget(scroll_widget)
         main_layout.addWidget(scroll_area)

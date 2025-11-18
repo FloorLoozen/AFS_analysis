@@ -169,7 +169,10 @@ class VideoWidget(QWidget):
         self.last_displayed_frame = frame_data.copy()
         
         # Draw tracking overlays if enabled using FrameProcessor
-        if self.tracking_enabled and len(self.bead_positions) > 0:
+        # Draw overlays when tracking is enabled and we have either explicit bead positions
+        # or trace history to show. Previously overlays required bead_positions non-empty
+        # which prevented traces-only displays; allow either to show overlays.
+        if self.tracking_enabled and (len(self.bead_positions) > 0 or len(self.bead_traces) > 0):
             # Pass traces only if show_traces is True
             traces_to_show = self.bead_traces if self.show_traces else {}
             frame_data = FrameProcessor.draw_bead_overlays(
