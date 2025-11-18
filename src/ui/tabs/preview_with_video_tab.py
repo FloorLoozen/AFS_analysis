@@ -42,16 +42,16 @@ class PreviewWithVideoTab(QWidget):
             video_container.setPalette(pal)
             video_container.setAutoFillBackground(True)
 
-        # Use vertical layout to stack two videos
+        # Use vertical layout for video (only one video now)
         video_vertical_layout = QVBoxLayout(video_container)
         video_vertical_layout.setContentsMargins(0, 0, 0, 0)
         video_vertical_layout.setSpacing(6)
 
-        # Top video container (main video)
-        top_video_group = QGroupBox("Acquisition Movie")
-        top_video_layout = QVBoxLayout(top_video_group)
-        top_video_layout.setContentsMargins(4, 4, 4, 4)
-        top_video_layout.setSpacing(0)
+        # Video container (main video only, no LUT)
+        video_group = QGroupBox("Acquisition Movie")
+        video_layout = QVBoxLayout(video_group)
+        video_layout.setContentsMargins(4, 4, 4, 4)
+        video_layout.setSpacing(0)
 
         # Video widget container
         video_widget_container = QWidget()
@@ -59,34 +59,8 @@ class PreviewWithVideoTab(QWidget):
         self.video_container_layout.setContentsMargins(0, 0, 0, 0)
         video_widget_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        top_video_layout.addWidget(video_widget_container)
-
-        video_vertical_layout.addWidget(top_video_group, 1)
-
-        # Bottom video placeholder
-        bottom_video_group = QGroupBox("LUT Movie")
-        bottom_video_layout = QVBoxLayout(bottom_video_group)
-        bottom_video_layout.setContentsMargins(4, 4, 4, 4)
-        bottom_video_layout.setSpacing(0)
-
-        # Placeholder content
-        bottom_video_placeholder = QWidget()
-        if isinstance(app, QApplication):
-            pal = bottom_video_placeholder.palette()
-            pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
-            bottom_video_placeholder.setPalette(pal)
-            bottom_video_placeholder.setAutoFillBackground(True)
-        placeholder_layout = QVBoxLayout(bottom_video_placeholder)
-        placeholder_layout.setContentsMargins(8, 8, 8, 8)
-
-        placeholder_label = QLabel("(To be implemented)")
-        placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        placeholder_label.setStyleSheet("color: #888; font-style: italic;")
-        placeholder_layout.addWidget(placeholder_label)
-
-        bottom_video_layout.addWidget(bottom_video_placeholder)
-
-        video_vertical_layout.addWidget(bottom_video_group, 1)
+        video_layout.addWidget(video_widget_container)
+        video_vertical_layout.addWidget(video_group)
 
         video_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         # Force minimum width to ensure proper sizing
@@ -135,11 +109,11 @@ class PreviewWithVideoTab(QWidget):
         self.bead_list.currentItemChanged.connect(self.preview_tab._on_bead_selected)
         self.select_all.stateChanged.connect(self.preview_tab._toggle_select_all)
 
-        # Add three columns: video=1/3, bead list=1/3 of remaining 2/3, preview plots=2/3 of remaining 2/3
-        # Ratio 3:2:6 ensures video is exactly 1/3, then remaining 2/3 splits as 1:3 (bead list : plots)
-        layout.addWidget(video_container, 3)  # 3/11 ≈ 27%
-        layout.addWidget(beads_group, 2)  # 2/11 ≈ 18% (middle - bead list)
-        layout.addWidget(self.preview_tab, 6)  # 6/11 ≈ 55% (right - plots)
+        # Add three columns: video=1/2, bead list=1/10 (1/5 of 1/2), preview plots=2/5 (4/5 of 1/2)
+        # Ratio 5:1:4 ensures video is exactly 1/2, then remaining 1/2 splits as 1:4 (bead list : plots)
+        layout.addWidget(video_container, 5)  # 5/10 = 1/2
+        layout.addWidget(beads_group, 1)  # 1/10
+        layout.addWidget(self.preview_tab, 4)  # 4/10 = 2/5
     
     def set_video_widget(self, video_widget):
         """Set the shared video widget from Traces tab."""

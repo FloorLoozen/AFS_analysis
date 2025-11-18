@@ -67,16 +67,16 @@ class TracesWithVideoTab(QWidget):
             video_container.setPalette(pal)
             video_container.setAutoFillBackground(True)
 
-        # Use vertical layout to stack two videos
+        # Use vertical layout for video (only one video now)
         video_vertical_layout = QVBoxLayout(video_container)
         video_vertical_layout.setContentsMargins(0, 0, 0, 0)
         video_vertical_layout.setSpacing(6)
 
-        # Top video container (main video)
-        top_video_group = QGroupBox("Acquisition Movie")
-        top_video_layout = QVBoxLayout(top_video_group)
-        top_video_layout.setContentsMargins(4, 4, 4, 4)
-        top_video_layout.setSpacing(0)
+        # Video container (main video only, no LUT)
+        video_group = QGroupBox("Acquisition Movie")
+        video_layout = QVBoxLayout(video_group)
+        video_layout.setContentsMargins(4, 4, 4, 4)
+        video_layout.setSpacing(0)
 
         # Video widget container
         video_widget_container = QWidget()
@@ -90,34 +90,8 @@ class TracesWithVideoTab(QWidget):
         self.video_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.video_container_layout.addWidget(self.video_widget)
 
-        top_video_layout.addWidget(video_widget_container)
-
-        video_vertical_layout.addWidget(top_video_group, 1)
-
-        # Bottom video placeholder
-        bottom_video_group = QGroupBox("LUT Movie")
-        bottom_video_layout = QVBoxLayout(bottom_video_group)
-        bottom_video_layout.setContentsMargins(4, 4, 4, 4)
-        bottom_video_layout.setSpacing(0)
-
-        # Placeholder content
-        bottom_video_placeholder = QWidget()
-        if isinstance(app, QApplication):
-            pal = bottom_video_placeholder.palette()
-            pal.setColor(QPalette.Window, app.palette().color(QPalette.Window))
-            bottom_video_placeholder.setPalette(pal)
-            bottom_video_placeholder.setAutoFillBackground(True)
-        placeholder_layout = QVBoxLayout(bottom_video_placeholder)
-        placeholder_layout.setContentsMargins(8, 8, 8, 8)
-
-        placeholder_label = QLabel("(To be implemented)")
-        placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        placeholder_label.setStyleSheet("color: #888; font-style: italic;")
-        placeholder_layout.addWidget(placeholder_label)
-
-        bottom_video_layout.addWidget(bottom_video_placeholder)
-
-        video_vertical_layout.addWidget(bottom_video_group, 1)
+        video_layout.addWidget(video_widget_container)
+        video_vertical_layout.addWidget(video_group)
 
         video_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         # Force minimum width to ensure equal sizing
@@ -150,10 +124,11 @@ class TracesWithVideoTab(QWidget):
         z_traces_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         z_traces_group.setMinimumWidth(100)
 
-        # Add three columns to the main layout with equal stretch so they are equally divided
-        layout.addWidget(video_container, 1)
-        layout.addWidget(xy_traces_group, 1)
-        layout.addWidget(z_traces_group, 1)
+        # Add three columns: video=1/2, XY traces=1/4 (1/2 of 1/2), Z traces=1/4 (1/2 of 1/2)
+        # Ratio 4:2:2 ensures video is exactly 1/2, then remaining 1/2 splits equally between XY and Z
+        layout.addWidget(video_container, 4)  # 4/8 = 1/2
+        layout.addWidget(xy_traces_group, 2)  # 2/8 = 1/4
+        layout.addWidget(z_traces_group, 2)  # 2/8 = 1/4
     
     def attach_video_widget(self):
         """Attach video widget to this tab's layout."""

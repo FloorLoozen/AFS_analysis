@@ -22,6 +22,7 @@ class MainWindow(QMainWindow):
         self.video_widget: Optional[object] = None  # Will be VideoWidget
         self.tab_widget: Optional[QTabWidget] = None
         self.info_dialog: Optional[QDialog] = None
+        self.lut_dialog: Optional[QDialog] = None
         
         self._init_ui()
 
@@ -66,13 +67,18 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)  # type: ignore
         file_menu.addAction(exit_action)  # type: ignore
 
-        # Info menu (standalone)
-        info_menu = menubar.addMenu("Info")  # type: ignore
+        # View menu
+        view_menu = menubar.addMenu("View")  # type: ignore
         
-        show_info_action = QAction("Show Info...", self)
+        show_info_action = QAction("Metadata Info...", self)
         show_info_action.setShortcut("Ctrl+I")
         show_info_action.triggered.connect(self._show_info_dialog)
-        info_menu.addAction(show_info_action)  # type: ignore
+        view_menu.addAction(show_info_action)  # type: ignore
+        
+        show_lut_action = QAction("LUT Video...", self)
+        show_lut_action.setShortcut("Ctrl+L")
+        show_lut_action.triggered.connect(self._show_lut_dialog)
+        view_menu.addAction(show_lut_action)  # type: ignore
 
         # Help menu
         help_menu = menubar.addMenu("Help")  # type: ignore
@@ -255,6 +261,28 @@ class MainWindow(QMainWindow):
         self.info_dialog.show()
         self.info_dialog.raise_()
         self.info_dialog.activateWindow()
+
+    def _show_lut_dialog(self):
+        """Show LUT video dialog as popup."""
+        if not self.lut_dialog:
+            self.lut_dialog = QDialog(self)
+            self.lut_dialog.setWindowTitle("LUT Video")
+            self.lut_dialog.resize(800, 600)
+            
+            layout = QVBoxLayout(self.lut_dialog)
+            layout.setContentsMargins(10, 10, 10, 10)
+            
+            from PyQt5.QtWidgets import QLabel
+            from PyQt5.QtCore import Qt
+            placeholder = QLabel("LUT Video\n\n(To be implemented)")
+            placeholder.setAlignment(Qt.AlignCenter)
+            placeholder.setStyleSheet("color: #888; font-style: italic; font-size: 14pt;")
+            
+            layout.addWidget(placeholder)
+        
+        self.lut_dialog.show()
+        self.lut_dialog.raise_()
+        self.lut_dialog.activateWindow()
 
     def _toggle_fullscreen(self):
         """Toggle between maximized and normal window."""
